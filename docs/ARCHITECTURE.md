@@ -19,7 +19,7 @@ Status: **P0 implementiran samo kao okvir.** Sve ispod „Plan“ je planirano, 
 
 ## Tehnički nalazi i odstupanja
 
-1. **Repozitorij se zove `brljavljenja`**, ne `home-inventory-pwa` (sesija je vezana uz njega). `package.json` name je `home-inventory-pwa`. Preimenovanje je odluka vlasnika.
+1. **Ime repozitorija:** razvoj je preseljen iz `brljavljenja` u `-home-inventory-pwa` (ime počinje crticom, vjerojatno nenamjerno). `package.json` name je `home-inventory-pwa`. Preimenovanje je odluka vlasnika.
 2. **TypeScript 6.0.3 umjesto 7.0.2**: `typescript-eslint@8.72.1` deklarira peer `typescript <6.1.0`.
 3. **Bez `vite-plugin-pwa`**: minimalni vlastiti plugin (≈50 linija, testiran) smanjuje ovisnosti i kompatibilnost s Viteom 8 se ne treba pretpostavljati.
 4. **Kontradikcija u handoffu (za odluku funkcionalne arhitekture):** §4 traži da se `appliedOps` mehanizam izvede unutar Firestore transakcije, a §2 traži

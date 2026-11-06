@@ -4,7 +4,7 @@
 
 ## Odluke koje čekaju vlasnika
 
-1. Ostaje li ime repozitorija `brljavljenja` ili se preimenuje u `home-inventory-pwa` (GitHub → Settings → Repository name)?
+1. Repozitorij je preseljen u `-home-inventory-pwa` (ime počinje crticom). Ako to nije namjerno, preimenuj ga u `home-inventory-pwa` (GitHub → Settings → Repository name). Stari repozitorij `brljavljenja` više se ne koristi.
 2. Pregled i spajanje P0 pull requesta.
 
 ## Prije P1 (Firebase)
