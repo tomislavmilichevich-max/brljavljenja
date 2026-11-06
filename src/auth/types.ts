@@ -7,7 +7,14 @@ export interface SessionUser {
 export type AccessResult =
   | { status: 'member'; householdName: string | null }
   | { status: 'denied' }
-  | { status: 'error'; kind: 'offline' | 'unknown' };
+  | { status: 'error'; kind: AccessErrorKind };
+
+/**
+ * offline/unknown: pristup nije moguće potvrditi.
+ * household-missing: postoji zapis članstva, ali NE i dokument kućanstva (neuspjeli bootstrap) —
+ * to nikad ne smije izgledati kao odobren pristup.
+ */
+export type AccessErrorKind = 'offline' | 'unknown' | 'household-missing';
 
 /** Greške prijave svedene na razumljive vrste (bez firebase-specifičnih kodova u UI-ju). */
 export type SignInErrorKind = 'cancelled' | 'network' | 'too-many-requests' | 'unknown';

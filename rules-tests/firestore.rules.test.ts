@@ -221,6 +221,19 @@ describe('ACL — ostale putanje (P2/P3 kolekcije i nepoznato)', () => {
   });
 });
 
+describe('ACL — household dokument ne postoji (kontekst P1-REV-01)', () => {
+  it('aktivni član (membership postoji) smije GET nepostojećeg household dokumenta -> exists()==false; nečlan ostaje DENY', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await deleteDoc(doc(ctx.firestore(), 'households', H1));
+    });
+    const snap = await assertSucceeds(getDoc(doc(as('uidA'), 'households', H1)));
+    // Pravila to namjerno/nužno dopuštaju (subkolekcija postoji bez roditelja) — zato klijent
+    // MORA exists()==false tretirati kao "nije postavljeno", a ne kao odobren pristup.
+    expect(snap.exists()).toBe(false);
+    await assertFails(getDoc(doc(as('uidC'), 'households', H1)));
+  });
+});
+
 describe('ACL — opoziv', () => {
   it('ACL-19/20 nakon enabled:false za uidA: A odbijen, B i dalje dopušten', async () => {
     await assertSucceeds(getDoc(doc(as('uidA'), 'households', H1)));

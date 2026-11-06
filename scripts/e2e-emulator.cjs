@@ -34,6 +34,14 @@ async function adminPatch(path, fields) {
 }
 
 // Pravi Google popup nije izvediv u sandboxu (apis.google.com blokiran); koristi se emulatorski račun.
+async function adminDelete(path) {
+  const r = await fetch(`${FS}/${path}`, {
+    method: 'DELETE',
+    headers: { Authorization: 'Bearer owner' },
+  });
+  if (!r.ok) throw new Error(`admin delete ${path}: ${r.status}`);
+}
+
 async function signInAs(page, _ctx, name) {
   await page.evaluate((n) => window.__e2eSignInWithEmulatorAccount(n), name.toLowerCase());
 }
@@ -158,7 +166,50 @@ async function signInAs(page, _ctx, name) {
     await page.getByTestId('household-name').waitFor({ timeout: 20000 });
     check('E2E-10 povratak mreže: automatska ponovna provjera daje pristup', true);
 
-    check('E2E-11 nema neuhvaćenih JS grešaka', errors.length === 0, errors.join(' | '));
+    // 8) P1-REV-02: opoziv tijekom otvorene sesije + jasno razlikovanje offline od potvrde sa servera.
+    //    (Prag između povratka u prvi plan je 15 s — čekamo ga pa šaljemo visibilitychange.)
+    await ctx.setOffline(true);
+    await page.waitForTimeout(16000);
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.getByTestId('stale-warning').waitFor({ timeout: 40000 });
+    check(
+      'E2E-11 offline revalidacija: prikaz ostaje, ali je označen kao NEPOTVRĐEN (ne "potvrđen sa servera")',
+      (await page.getByTestId('household-name').count()) === 1 &&
+        (await page.getByTestId('verified-at').count()) === 0,
+    );
+    await adminPatch(`households/${H}/members/${uidC}`, {
+      uid: uidC,
+      role: 'member',
+      enabled: false,
+    }); // vlasnik opoziva dok je korisnik offline
+    await ctx.setOffline(false); // 'online' događaj -> odmah revalidacija
+    await page.getByRole('heading', { name: 'Nemaš pristup' }).waitFor({ timeout: 40000 });
+    check(
+      'E2E-12 opoziv tijekom otvorene sesije: "Pristup odobren" nestaje bez reloada, naziv kućanstva uklonjen iz DOM-a',
+      !(await page.locator('body').innerText()).includes('Testno kućanstvo') &&
+        (await page.getByText('Pristup odobren').count()) === 0,
+    );
+
+    // 9) P1-REV-01: članstvo postoji, ali dokument kućanstva ne postoji -> NIJE odobren.
+    await adminPatch(`households/${H}/members/${uidC}`, {
+      uid: uidC,
+      role: 'member',
+      enabled: true,
+    });
+    await page.getByRole('button', { name: 'Provjeri ponovno' }).click();
+    await page.getByTestId('household-name').waitFor({ timeout: 20000 });
+    await adminDelete(`households/${H}`); // members/{uid} ostaje (subkolekcija bez roditelja)
+    await page.getByRole('button', { name: 'Provjeri pristup' }).click();
+    await page
+      .getByRole('heading', { name: 'Provjera pristupa nije uspjela' })
+      .waitFor({ timeout: 20000 });
+    const body = await page.locator('body').innerText();
+    check(
+      'E2E-13 membership postoji, household ne postoji: poruka o nepostavljenom kućanstvu, NIKAD "Pristup odobren"',
+      body.includes('dokument kućanstva nije postavljen') && !body.includes('Pristup odobren'),
+    );
+
+    check('E2E-14 nema neuhvaćenih JS grešaka', errors.length === 0, errors.join(' | '));
   } catch (e) {
     check('E2E izvršavanje', false, String(e).split('\n')[0]);
   } finally {

@@ -44,6 +44,9 @@ function Session({ services }: { services: Services }) {
         <Member
           householdName={state.householdName}
           displayName={state.user.displayName}
+          verifiedAt={state.verifiedAt}
+          stale={state.stale}
+          onRecheck={recheck}
           onSignOut={signOut}
           signOutFailed={signOutFailed}
         />

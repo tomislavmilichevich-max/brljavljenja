@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AccessResult, AuthPort, Services, SessionUser, SignInErrorKind } from '../auth/types';
 import { App } from './App';
 
@@ -190,5 +190,143 @@ describe('App — P1 ekrani', () => {
     render(<App services={f.services} />);
     await f.emitUser(userA);
     await screen.findByRole('heading', { name: 'Provjera pristupa nije uspjela' });
+  });
+});
+
+describe('App — revalidacija tijekom otvorene sesije (P1-REV-02) i household-missing (P1-REV-01)', () => {
+  const MEMBER: AccessResult = { status: 'member', householdName: 'Dom' };
+  const DENIED: AccessResult = { status: 'denied' };
+  const OFFLINE: AccessResult = { status: 'error', kind: 'offline' };
+  // Redom vraća zadane rezultate; zadnji se ponavlja.
+  const seq = (results: AccessResult[]) => async () =>
+    results.length > 1 ? results.shift()! : results[0]!;
+  const setVisibility = (v: 'visible' | 'hidden') =>
+    Object.defineProperty(document, 'visibilityState', { value: v, configurable: true });
+  const fireVisibility = () =>
+    act(async () => void document.dispatchEvent(new Event('visibilitychange')));
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setVisibility('visible');
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    setVisibility('visible');
+  });
+
+  async function openMember(f: ReturnType<typeof fake>) {
+    render(<App services={f.services} />);
+    await f.emitUser(userA);
+    await screen.findByTestId('household-name');
+  }
+
+  it('REV-01 household ne postoji (membership postoji): NIKAD "Pristup odobren"', async () => {
+    const f = fake({ status: 'error', kind: 'household-missing' });
+    render(<App services={f.services} />);
+    await f.emitUser(userA);
+    await screen.findByRole('heading', { name: 'Provjera pristupa nije uspjela' });
+    expect(screen.getByRole('alert').textContent).toContain('dokument kućanstva nije postavljen');
+    expect(screen.queryByText('Pristup odobren')).toBeNull();
+    expect(screen.queryByTestId('household-name')).toBeNull();
+  });
+
+  it('prikazuje vrijeme potvrde sa servera nakon odobrenja', async () => {
+    await openMember(fake(MEMBER));
+    expect(screen.getByTestId('verified-at').textContent).toContain('potvrđen sa servera');
+  });
+
+  it('opoziv: povratak u prvi plan nakon >15 s uklanja "Pristup odobren"', async () => {
+    const f = fake(seq([MEMBER, DENIED]));
+    await openMember(f);
+    await act(async () => void vi.advanceTimersByTime(16_000));
+    await fireVisibility();
+    await screen.findByRole('heading', { name: 'Nemaš pristup' });
+    expect(screen.queryByTestId('household-name')).toBeNull();
+    expect(document.body.textContent).not.toContain('Dom');
+    expect(f.checkAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it('prag: ponovljeni povratak u prvi plan unutar 15 s NE troši novo čitanje', async () => {
+    const f = fake(MEMBER);
+    await openMember(f);
+    await fireVisibility();
+    await fireVisibility();
+    expect(f.checkAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('skrivena aplikacija ne revalidira (visibilitychange u "hidden")', async () => {
+    const f = fake(MEMBER);
+    await openMember(f);
+    await act(async () => void vi.advanceTimersByTime(16_000));
+    setVisibility('hidden');
+    await fireVisibility();
+    expect(f.checkAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('oporavak mreže revalidira odmah (zaobilazi prag) i uklanja odobrenje opozvanom članu', async () => {
+    const f = fake(seq([MEMBER, DENIED]));
+    await openMember(f);
+    await act(async () => void window.dispatchEvent(new Event('online')));
+    await screen.findByRole('heading', { name: 'Nemaš pristup' });
+    expect(f.checkAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it('offline revalidacija: prikaz ostaje, ali je JASNO označen kao nepotvrđen; povratak mreže briše upozorenje', async () => {
+    const f = fake(seq([MEMBER, OFFLINE, MEMBER]));
+    await openMember(f);
+    await act(async () => void vi.advanceTimersByTime(16_000));
+    await fireVisibility();
+    await screen.findByTestId('stale-warning');
+    expect(screen.getByTestId('stale-warning').textContent).toContain('nije moguće potvrditi');
+    expect(screen.queryByTestId('verified-at')).toBeNull();
+    expect(screen.getByTestId('household-name')).toBeTruthy();
+    await act(async () => void window.dispatchEvent(new Event('online')));
+    await screen.findByTestId('verified-at');
+    expect(screen.queryByTestId('stale-warning')).toBeNull();
+  });
+
+  it('rijetki timer (10 min) revalidira dok je vidljivo; ne prije', async () => {
+    const f = fake(seq([MEMBER, DENIED]));
+    await openMember(f);
+    await act(async () => void vi.advanceTimersByTime(9 * 60_000));
+    expect(f.checkAccess).toHaveBeenCalledTimes(1);
+    await act(async () => void vi.advanceTimersByTime(60_000 + 100));
+    await screen.findByRole('heading', { name: 'Nemaš pristup' });
+    expect(f.checkAccess).toHaveBeenCalledTimes(2);
+  });
+
+  it('timer ne čita dok je aplikacija skrivena', async () => {
+    const f = fake(MEMBER);
+    await openMember(f);
+    setVisibility('hidden');
+    await act(async () => void vi.advanceTimersByTime(10 * 60_000 + 100));
+    expect(f.checkAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('household nestane tijekom sesije: odobrenje se uklanja', async () => {
+    const f = fake(seq([MEMBER, { status: 'error', kind: 'household-missing' }]));
+    await openMember(f);
+    await act(async () => void vi.advanceTimersByTime(16_000));
+    await fireVisibility();
+    await screen.findByRole('heading', { name: 'Provjera pristupa nije uspjela' });
+    expect(screen.queryByTestId('household-name')).toBeNull();
+  });
+
+  it('nakon odjave nema više revalidacija (listeneri uklonjeni)', async () => {
+    const f = fake(MEMBER);
+    await openMember(f);
+    fireEvent.click(screen.getByRole('button', { name: 'Odjava' }));
+    await screen.findByRole('button', { name: 'Prijava Google računom' });
+    await act(async () => void vi.advanceTimersByTime(11 * 60_000));
+    await fireVisibility();
+    await act(async () => void window.dispatchEvent(new Event('online')));
+    expect(f.checkAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('gumb "Provjeri pristup" ručno ponavlja provjeru', async () => {
+    const f = fake(seq([MEMBER, DENIED]));
+    await openMember(f);
+    fireEvent.click(screen.getByRole('button', { name: 'Provjeri pristup' }));
+    await screen.findByRole('heading', { name: 'Nemaš pristup' });
   });
 });

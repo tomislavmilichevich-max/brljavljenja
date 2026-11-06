@@ -19,7 +19,8 @@ import {
   type Firestore,
 } from 'firebase/firestore';
 import type { FirebasePublicConfig } from '../config/env';
-import { classifyAccessError, classifyAuthError, shouldFallBackToRedirect } from '../auth/errors';
+import { evaluateAccess } from '../auth/access';
+import { classifyAuthError, shouldFallBackToRedirect } from '../auth/errors';
 import type { AccessPort, AccessResult, AuthPort, Services } from '../auth/types';
 
 /** Emulatori samo u dev načinu i samo izričitom zastavicom — nikad u produkcijskom buildu. */
@@ -98,14 +99,11 @@ function createAccessPort({ db }: Handles, householdId: string): AccessPort {
       // householdId je u konfiguraciji, ali NIJE autorizacija: odluku donose Security Rules.
       // getDocFromServer (NE getDoc): getDoc offline tiho vraća predmemorirani dokument, što bi pokazalo
       // 'odobren' bez potvrde poslužitelja (opozvani član) ili drugom računu na istom uređaju nakon odjave.
-      try {
+      return evaluateAccess(async () => {
         const snap = await getDocFromServer(doc(db, 'households', householdId));
         const name = snap.exists() ? ((snap.data()?.name as string | undefined) ?? null) : null;
-        return { status: 'member', householdName: name };
-      } catch (e) {
-        const kind = classifyAccessError(e);
-        return kind === 'denied' ? { status: 'denied' } : { status: 'error', kind };
-      }
+        return { exists: snap.exists(), name };
+      });
     },
   };
 }

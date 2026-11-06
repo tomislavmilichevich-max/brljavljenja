@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { SignInErrorKind } from '../auth/types';
+import type { AccessErrorKind, SignInErrorKind } from '../auth/types';
 
 /**
  * PRIVREMENI neutralni ekrani za P1 (prijava / provjera / odobren / nema pristupa / greška).
@@ -50,9 +50,16 @@ export function CheckingAccess() {
   return <p role="status">Provjera pristupa kućanstvu…</p>;
 }
 
+function formatTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString('hr-HR', { hour: '2-digit', minute: '2-digit' });
+}
+
 export function Member(props: {
   householdName: string | null;
   displayName: string | null;
+  verifiedAt: number;
+  stale: boolean;
+  onRecheck: () => void;
   onSignOut: () => void;
   signOutFailed: boolean;
 }) {
@@ -63,11 +70,27 @@ export function Member(props: {
       <p data-testid="household-name">
         Kućanstvo: {props.householdName ?? '(dokument kućanstva nema naziv)'}
       </p>
+      {props.stale ? (
+        <p role="alert" data-testid="stale-warning">
+          Pristup zadnji put potvrđen u {formatTime(props.verifiedAt)}. Trenutno ga nije moguće
+          potvrditi (nema veze s poslužiteljem) pa prikaz može biti zastario. Provjera se ponavlja
+          kad se veza vrati.
+        </p>
+      ) : (
+        <p data-testid="verified-at">
+          Pristup potvrđen sa servera u {formatTime(props.verifiedAt)}.
+        </p>
+      )}
       <p>Inventar još nije implementiran (P2).</p>
       {props.signOutFailed && <p role="alert">Odjava nije uspjela. Pokušaj ponovno.</p>}
-      <button type="button" onClick={props.onSignOut}>
-        Odjava
-      </button>
+      <p>
+        <button type="button" onClick={props.onRecheck}>
+          Provjeri pristup
+        </button>{' '}
+        <button type="button" onClick={props.onSignOut}>
+          Odjava
+        </button>
+      </p>
     </section>
   );
 }
@@ -120,19 +143,23 @@ export function Denied(props: { uid: string; onRecheck: () => void; onSignOut: (
   );
 }
 
+const ACCESS_ERROR_MESSAGES: Record<AccessErrorKind, string> = {
+  offline:
+    'Nema veze s poslužiteljem. Pristup nije potvrđen i ništa se ne prikazuje dok se veza ne vrati.',
+  unknown: 'Došlo je do pogreške pri provjeri pristupa. Pristup nije potvrđen.',
+  'household-missing':
+    'Tvoje članstvo postoji, ali dokument kućanstva nije postavljen (nepotpuna priprema u Firebase Console). Pristup NIJE odobren. Javi se vlasniku.',
+};
+
 export function AccessError(props: {
-  kind: 'offline' | 'unknown';
+  kind: AccessErrorKind;
   onRecheck: () => void;
   onSignOut: () => void;
 }) {
   return (
     <section aria-labelledby="t">
       <h2 id="t">Provjera pristupa nije uspjela</h2>
-      <p role="alert">
-        {props.kind === 'offline'
-          ? 'Nema veze s poslužiteljem. Pristup nije potvrđen i ništa se ne prikazuje dok se veza ne vrati.'
-          : 'Došlo je do pogreške pri provjeri pristupa. Pristup nije potvrđen.'}
-      </p>
+      <p role="alert">{ACCESS_ERROR_MESSAGES[props.kind]}</p>
       <p>
         <button type="button" onClick={props.onRecheck}>
           Pokušaj ponovno
