@@ -1,0 +1,20 @@
+/* Privremeni minimalni stil — nije dizajn. */
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+body {
+  margin: 0;
+}
+.shell {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem 16px;
+}
+dt {
+  font-weight: 600;
+  margin-top: 0.75rem;
+}
+dd {
+  margin: 0;
+}

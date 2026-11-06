@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- PRIVREMENA ikona (placeholder) — konačni identitet dolazi iz UI/UX handoffa. -->
+  <rect width="512" height="512" fill="#1f2933"/>
+  <path d="M96 232 256 104l160 128v176a16 16 0 0 1-16 16H112a16 16 0 0 1-16-16z" fill="none" stroke="#f5f7fa" stroke-width="28" stroke-linejoin="round"/>
+  <rect x="200" y="288" width="112" height="136" fill="#f5f7fa"/>
+</svg>
