@@ -63,11 +63,19 @@ households/{householdId}
 - **Memorijski cache, bez IndexedDB persistencea** u P1 (nakon odjave/reloada na uređaju nema privatnog sadržaja). Persistence se uvodi tek s P2/P3 uz test prelaska računa.
 - Ekrani su privremeni i neutralni (`src/app/screens.tsx`), bez Organized Cozy dizajna.
 
+### Pristup tijekom sesije (P1-REV-01/02)
+
+- `evaluateAccess` (`src/auth/access.ts`): `exists()==false` za `households/{h}` **nije** odobren pristup (`household-missing`) — Rules aktivnom članu dopuštaju `get` nepostojećeg dokumenta jer subkolekcija `members` može postojati bez roditelja.
+- **Revalidacija otvorene sesije** (`src/auth/useSession.ts`), bez pollinga: (1) povratak aplikacije u prvi plan (`visibilitychange`, najviše jednom u 15 s), (2) oporavak mreže (`online`, odmah), (3) vrlo rijedak timer od 10 min **samo dok je aplikacija vidljiva** (≤ 6 čitanja/h po aktivnom uređaju; Spark 50.000 čitanja/dan prema vlasnikovoj provjeri), (4) ručni gumb „Provjeri pristup“.
+- **Ponašanje:** odbijanje s poslužitelja (`permission-denied`) → odmah „Nemaš pristup“ i uklanjanje podataka kućanstva s ekrana. Poslužitelj nedostupan (offline) → prikaz **ostaje**, ali je jasno označen kao nepotvrđen („zadnji put potvrđen u HH:MM… prikaz može biti zastario“) i **ne** piše „potvrđen sa servera“. Povratak mreže odmah ponavlja provjeru.
+- **Poznato ograničenje:** nema push opoziva. Aplikacija koja je neprekidno vidljiva i online uočit će opoziv najkasnije nakon 10 min (ili ranije pri povratku u prvi plan / ručnom provjerom). Realtime listener nije korišten jer Rules ne jamče ponovnu provjeru `get()` uvjeta za otvorene listenere.
+
 ### Nalazi P1 koje P2/P3 moraju poštovati
 
 1. **`getDoc` offline vraća predmemorirani dokument** (i nakon odjave u istoj stranici). Za provjeru članstva zato `getDocFromServer`. Za P2 čitanja inventara: prije prikaza podataka drugog korisnika na istom uređaju Firestore instancu treba prekinuti (`terminate`) i ponovno inicijalizirati, ili ne dijeliti cache među računima — **to P1 nije rješavao**.
 2. **`await` prije `signInWithPopup` ruši popup** (gubi korisnikov dodir; Chrome/Android blokira). Ne dodavati async posao prije tog poziva.
-3. Bundle je narastao na ≈235 kB gzip (Firebase auth+firestore). Za P2+ razmotriti code-splitting.
+3. **Gate za P2/P3 (nalaz glavnog razvoja, NIJE implementirano):** `getDocFromServer` je ispravan fail-closed potez za _mrežno potvrđenu autorizaciju_ u P1, ali **ne smije postati trajni preduvjet za lokalnu offline pretragu** prethodno sinkroniziranog inventara. Prije P2 treba definirati razdvajanje: (a) mrežno potvrđena autorizacija (server, Security Rules) i (b) ograničen offline pristup lokalnim podacima na prethodno odobrenom, pouzdanom Androidu, uz **izolaciju/čišćenje lokalnog keša pri odjavi i promjeni računa** (Security Rules štite server, a lokalna predmemorija traži zasebnu zaštitu). Online provjera članstva ne smije trajno onemogućiti offline pretragu; opoziv se primjenjuje kad se provjera uspješno obavi, a lokalni podaci se tada brišu.
+4. Bundle je narastao na ≈235 kB gzip (Firebase auth+firestore). Za P2+ razmotriti code-splitting.
 
 ## Faze i razgraničenja
 

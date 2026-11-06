@@ -39,13 +39,16 @@ households/{householdId}/appliedOps/{opId}          # P3
 - Nema `list`, nema nijednog klijentskog `write`, nema catch-all pravila; `locations/items/placements/appliedOps` i nepoznate putanje = implicitno DENY.
 - Onemogućeni član ne može čitati ni vlastiti membership. Brisanjem ili `enabled:false` članstva pristup se gubi pri sljedećem čitanju s poslužitelja.
 - Pisanje članstva samo kroz Firebase Console (Admin zaobilazi pravila).
-- Stvarni rezultati: `docs/P1_TEST_REPORT.md` (35 testova pravila PASS + provjera mutacijama).
+- Stvarni rezultati: `docs/P1_TEST_REPORT.md` (36 testova pravila PASS + provjera mutacijama).
 
 ### Sigurnosni nalazi P1
 
 1. **Offline `getDoc` iz keša** moglo bi pokazati „odobren“ bez potvrde poslužitelja i preko odjave. Ispravljeno: `getDocFromServer`; pokriveno e2e testom E2E-9. Preostaje za P2 (vidi ARCHITECTURE).
 2. Firebase web konfiguracija nije tajna; zaštita je isključivo u pravilima. Dev-only kuka za emulator nije u produkcijskom bundleu (provjereno pretragom `dist`).
 3. Pravila nisu deployana; produkcijski deploy traži vlasnikovo odobrenje.
+4. **P1-REV-01:** aktivni član smije `get` nepostojećeg household dokumenta (Rules to dopuštaju). Klijent to tretira kao `household-missing`, nikad kao odobren pristup. Pokriveno: unit regresija, test pravila i E2E-13.
+5. **P1-REV-02:** opoziv tijekom otvorene sesije primjenjuje se pri revalidaciji (prvi plan / mreža / 10-min timer / ručno); do tada Rules već odbijaju svako novo čitanje s poslužitelja. Offline se prikaz označava nepotvrđenim. Pokriveno: E2E-11/12 i unit testovi.
+6. Preostalo za P2/P3: lokalni keš među računima i razdvajanje offline pristupa od mrežne autorizacije (ARCHITECTURE).
 
 ## P1: minimalni negativni testovi (emulator)
 

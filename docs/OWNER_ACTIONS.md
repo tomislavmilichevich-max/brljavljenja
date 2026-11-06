@@ -23,7 +23,8 @@ Redom; ništa od ovoga ne zahtijeva karticu. **Ne slati UID-ove ni konfiguraciju
 8. **UID-ovi:** _Authentication → Users → stupac User UID_ (ili kopiraj gumbom „Kopiraj UID“ u aplikaciji).
 9. **Kućanstvo (Console zapis zaobilazi pravila — samo ti):** _Firestore Database → Data → Start collection_ → Collection ID `households` → Document ID = tvoj `VITE_HOUSEHOLD_ID` → polja: `name` (string), `schemaVersion` (number) `1` → Save.
 10. **Članovi:** otvori taj dokument → _Add collection_ → ID `members` → Document ID = **UID prvog korisnika** → polja: `uid` (string, isti UID), `role` (string) `member`, `enabled` (**boolean**) `true` → Save. Ponovi za drugog korisnika. Polje `enabled` mora biti boolean, ne string „true“.
-11. **Provjera:** korisnik na „Nemaš pristup“ pritisne _Provjeri ponovno_ → treba vidjeti „Pristup odobren“ i naziv kućanstva. **Opoziv:** promijeni `enabled` na `false` ili obriši člana.
+    11a. Ako korisnik vidi „Tvoje članstvo postoji, ali dokument kućanstva nije postavljen“, nedostaje dokument `households/{id}` (korak 9) — pristup NIJE odobren dok se ne stvori.
+11. **Provjera:** korisnik na „Nemaš pristup“ pritisne _Provjeri ponovno_ → treba vidjeti „Pristup odobren“ i naziv kućanstva. **Opoziv:** promijeni `enabled` na `false` ili obriši člana. Otvorena aplikacija to primijeti pri povratku u prvi plan, kad se veza vrati, najkasnije nakon ≈10 min, ili pritiskom na „Provjeri pristup“; zatim prikazuje „Nemaš pristup“.
 12. Pravila: **ne deployati** sam. Kad odobriš, deploy radi samo `firestore.rules` (Spark, bez Blaze).
 
 Starije općenite korake zadržavamo ispod za referencu.
