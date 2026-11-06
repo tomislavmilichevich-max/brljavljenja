@@ -36,6 +36,9 @@ npm run build && npm run preview
 npm run test:rules     # Firestore Rules u emulatoru (traži Javu 21; bez mreže prema Firebaseu)
 npm run test:e2e       # e2e protiv Auth+Firestore emulatora (traži predinstalirani Playwright)
 npm run check:all      # check + no-actions + test:rules
+npm run guard:env|guard:dist|guard:rules   # P1.5 zaštitne provjere prije objave (ništa ne objavljuju)
+npm run build:prod     # guard:env → build → guard:dist (ispisuje točan popis datoteka za Hosting)
+npm run deploy:rules / deploy:hosting      # SAMO uz vlasnikovo odobrenje; fiksni projekt, uvijek --only
 ```
 
 Firebase JS SDK 13.2.0 instaliran je u P1 (točna verzija). `.env.example` daje predložak javne konfiguracije; privatni `.env.local` nije za GitHub.

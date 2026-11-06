@@ -9,7 +9,96 @@ Ažurirano: 2026-11-06. Ne slati tokene, servisne račune, tajne ili stvarne fot
 - P0 **ne zahtijeva PR**; već je na `main`. Ovaj dokumentacijski paket dolazi kao zaseban PR za pregled.
 - Ne pokretati GitHub Actions dok je limit potrošen.
 
+## P1.5 — Objava na Firebase Hosting i test na dva Androida (korak po korak)
+
+Ažurirano za P1.5. Koraci 1–4 starog P1 popisa (projekt, Google prijava, Firestore, `households/kuca1`) su već obavljeni; ispod je ono što slijedi. Nazivi izbornika u Firebase Console / Google Cloud mogu se malo razlikovati od onoga što piše ovdje; ako nešto ne nalaziš, javi što vidiš na ekranu.
+
+**Zašto ne objavljujem ja:** Claude Code cloud okruženje nema autorizirani Firebase pristup (`firebase login:list` → „No authorized accounts“). Jedini legitimni načini bili bi lijepljenje autorizacijskog koda/tokena u chat ili servisni ključ u repozitorij — oboje je zabranjeno. Zato objavu pokrećeš ti u **Google Cloud Shellu** (terminal u pregledniku, besplatan, već prijavljen tvojim Google računom). _Napomena: Cloud Shell nisam mogao isprobati iz svog okruženja, pa je to NOT VERIFIED._
+
+### A. Priprema (ništa se ne objavljuje; možeš odmah)
+
+1. **Tri javne vrijednosti iz Console.** Firebase Console → projekt `home-inventory-pwa-218be` → zupčanik → _Project settings_ → _General_ → dolje _Your apps_ → tvoja web aplikacija → _SDK setup and configuration_ → _Config_. Trebaju ti `apiKey`, `messagingSenderId`, `appId`. (Nisu tajne, ali ih ne trebaš slati u chat.)
+2. **Autorizirane domene.** Console → _Authentication_ → _Settings_ → _Authorized domains_. Provjeri da postoji `home-inventory-pwa-218be.firebaseapp.com` (obično je zadano). Ako ne, _Add domain_.
+3. **Provjeri plan.** Console → lijevo dolje treba pisati **Spark** (ne Blaze). Ne klikaj _Upgrade_. Ne dodaj karticu.
+4. **Provjeri dokument.** _Firestore Database_ → _Data_ → `households` → `kuca1` ima polja `name` (string) i `schemaVersion` (number) `1`. Članova (`members`) još nema, to je ispravno.
+5. **Otvori Cloud Shell:** u Chromeu otvori <https://shell.cloud.google.com>, prijavi se **istim Google računom koji je vlasnik Firebase projekta**, prihvati uvjete (_Authorize_ / _Continue_). Ako traži kreiranje Cloud projekta ili karticu, **stani** i javi mi.
+6. **Preuzmi kod** (u terminalu Cloud Shella; dugi pritisak za _Paste_):
+   ```bash
+   gh auth login        # GitHub.com → HTTPS → Login with a web browser; prepiši kratki kod na github.com/login/device
+   gh repo clone tomislavmilichevich-max/home-inventory-pwa
+   cd home-inventory-pwa
+   git checkout p1-5/firebase-hosting-readiness   # dok PR za P1.5 nije spojen u main; nakon spajanja: git checkout main && git pull
+   node -v                 # mora biti 20.19 ili noviji; ako nije: nvm install 22 && nvm use 22
+   npm ci
+   ```
+   (Ako `gh` nije dostupan: `git clone https://github.com/tomislavmilichevich-max/home-inventory-pwa`, pa korisničko ime i GitHub _personal access token_ kao lozinku — token upisuješ samo ovdje u Cloud Shell, nikad u chat.)
+7. **Konfiguracija (ne ide u Git).** Zamijeni tri `...` svojim vrijednostima iz koraka 1 i zalijepi cijeli blok:
+   ```bash
+   cat > .env.production.local <<'EOF'
+   VITE_FIREBASE_API_KEY=...
+   VITE_FIREBASE_AUTH_DOMAIN=home-inventory-pwa-218be.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=home-inventory-pwa-218be
+   VITE_FIREBASE_MESSAGING_SENDER_ID=...
+   VITE_FIREBASE_APP_ID=...
+   VITE_HOUSEHOLD_ID=kuca1
+   EOF
+   git status --short     # .env.production.local NE smije biti na popisu (ignoriran je)
+   ```
+8. **Probni build i provjere (još uvijek bez objave):**
+   ```bash
+   npm run guard:rules    # provjera pravila
+   npm run build:prod     # provjera konfiguracije → build → provjera dist-a; ispisuje TOČAN popis datoteka koje bi se objavile
+   ```
+   Ako ijedna provjera javi „ZAUSTAVLJENO“, **ne nastavljaj** nego mi pošalji ispis (bez ključeva).
+9. **Prijava firebase alata** (u Cloud Shellu):
+   ```bash
+   npx firebase login --no-localhost
+   ```
+   Otvori ispisani link u pregledniku, prijavi se i odobri, a dobiveni kod zalijepi **natrag u terminal Cloud Shella** (ne u chat). Zatim `npx firebase projects:list` mora prikazati `home-inventory-pwa-218be`.
+
+### B. Objava — TEK nakon mog prikaza i tvog izričitog odobrenja u chatu
+
+Prvo pravila, zatim Hosting; svaka naredba ima fiksni projekt i `--only` (nema generičkog `firebase deploy`):
+
+```bash
+npm run deploy:rules      # guard:rules → firebase deploy --only firestore:rules --project home-inventory-pwa-218be
+npm run deploy:hosting    # build:prod (sve provjere) → firebase deploy --only hosting --project home-inventory-pwa-218be
+```
+
+Provjera: `curl -sI https://home-inventory-pwa-218be.firebaseapp.com/ | head -5` treba vratiti `HTTP/2 200`.
+**Povrat (ako nešto pođe po zlu):** Console → _Hosting_ → _Release history_ → uz prethodno izdanje _Rollback_; pravila: vrati sadržaj deny-all (`allow read, write: if false;`) u Console → _Firestore_ → _Rules_ → _Publish_.
+
+### C. Testiranje na Androidima
+
+Vodi bilješke (datum, uređaj, što si vidio); rezultati idu u `docs/P1_5_TEST_REPORT.md` tek kad ih ti potvrdiš.
+
+1. **Uređaj A, Chrome:** otvori `https://home-inventory-pwa-218be.firebaseapp.com`. Treba se pojaviti ekran **Prijava**. Pritisni _Prijava Google računom_, odaberi račun, odobri. Posebno zabilježi što se događa pri **povratku iz Google prozora** (vrati li te u aplikaciju ili ostaneš na praznoj stranici).
+2. Očekuješ **„Nemaš pristup“** i polje **„Tvoj UID“**. Pritisni _Kopiraj UID_ (ili označi i kopiraj). UID se vidi i u Console → _Authentication_ → _Users_. Ne šalji ga u chat.
+3. **Ručno odobrenje (Console):** _Firestore Database_ → _Data_ → `households` → `kuca1` → _Start collection_ (ako `members` ne postoji) → Collection ID `members` → Document ID = **zalijepljeni UID uređaja A** → polja:
+
+   | Polje     | Tip         | Vrijednost |
+   | --------- | ----------- | ---------- |
+   | `uid`     | string      | isti UID   |
+   | `role`    | string      | `member`   |
+   | `enabled` | **boolean** | `true`     |
+
+   _Save_. (`enabled` mora biti boolean, ne string.)
+
+4. Na uređaju A pritisni **Provjeri ponovno** → očekuješ **„Pristup odobren“**, naziv kućanstva i „Pristup potvrđen sa servera u HH:MM“.
+5. **Uređaj B** (drugi Google račun): isto — prije odobrenja „Nemaš pristup“; zatim dodaj `members/{UID-B}` kao u koraku 3; „Provjeri ponovno“ → odobreno.
+6. **Treći račun** (ako ga imaš): prijava smije uspjeti, ali mora ostati „Nemaš pristup“. Ako ga nemaš, upiši NOT VERIFIED.
+7. **Opoziv:** u Console postavi `members/{UID-B}` → `enabled` = **false** (boolean). Na uređaju B pritisni _Provjeri pristup_ (ili pređi u drugu aplikaciju i vrati se, najkasnije ≈10 min) → treba „Nemaš pristup“. Uređaj A mora zadržati pristup. Zatim vrati `enabled` = true.
+8. **Instalacija PWA:** u Chromeu na uređaju A izbornik ⋮ → _Install app_ / _Dodaj na početni zaslon_. Otvori instaliranu aplikaciju s početnog zaslona, odjavi se i ponovno prijavi (redirect/popup i povratak u aplikaciju). Isto na uređaju B.
+9. **Bez veze:** uključi način rada u zrakoplovu na uređaju A dok je aplikacija otvorena, pa je zatvori i ponovno otvori. Ljuska aplikacije se mora otvoriti, ali **ne smije** pisati da je pristup svježe potvrđen (vidjet ćeš upozorenje o nepotvrđenom pristupu ili grešku veze). Ovo NIJE test offline pretrage (to je P2/P3).
+10. **Spark / trošak:** Console → lijevo dolje i _Usage and billing_ — treba i dalje pisati **Spark**; zabilježi _Usage_ za Firestore i Hosting.
+
+Ako bilo što od 1–10 ne uspije, **ne pokušavaj zaobilaziti** (ne mijenjaj pravila ručno, ne uključuj plaćene usluge). Zabilježi točan tekst poruke i javi mi.
+
+---
+
 ## P1: precizni koraci za Android tablet (Chrome, stranica „Desktop site“ za Firebase Console)
+
+> **Zamijenjeno za P1.5 (vidi gore).** Koraci 1–4 su obavljeni; korak 5 (varijable u Claude Code okruženju) više se ne koristi jer objavu radi vlasnik u Cloud Shellu s `.env.production.local`; korake 7–12 zamjenjuje odjeljak P1.5 A–C.
 
 Redom; ništa od ovoga ne zahtijeva karticu. **Ne slati UID-ove ni konfiguraciju u chat osim ako Claude izričito zatraži.**
 
