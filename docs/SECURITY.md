@@ -1,6 +1,6 @@
 # SECURITY — Kućni inventar
 
-Status: P0 je samo siguran kostur. P1 tek treba implementirati. Ažurirano: 2026-11-06.
+Status: P1 pravila i klijent implementirani i testirani u emulatoru (PR čeka odobrenje); NISU deployani. Stvarni Android/Google login NOT VERIFIED. Ažurirano: 2026-11-06.
 
 ## Obavezne granice
 
@@ -11,9 +11,10 @@ Status: P0 je samo siguran kostur. P1 tek treba implementirati. Ažurirano: 2026
 
 ## P1: model pristupa (odobreno)
 
-Jedno kućanstvo, dva *ovlaštena* korisnika s odvojenim Firebase Google Auth računima. Autentikacija nije isto što i autorizacija.
+Jedno kućanstvo, dva _ovlaštena_ korisnika s odvojenim Firebase Google Auth računima. Autentikacija nije isto što i autorizacija.
 
 Putanje:
+
 ```text
 households/{householdId}
 households/{householdId}/members/{uid}
@@ -31,6 +32,20 @@ households/{householdId}/appliedOps/{opId}          # P3
 - P2/P3 kolekcije do zasebnog odobrenja ostaju **deny all** (osim eventualno namjenskih emulator-only testnih fixturea koji se ne smiju deployati).
 - P1 sučelje nakon odjave ne prikazuje privatno predmemorirane podatke. Ako se web cache aktivira, testirati prelazak s ovlaštenog na neovlašten račun na istom uređaju.
 - Security Rules su autoritet; ne oslanjati se na skrivanje gumba ili frontend whitelistu e-mailova.
+
+## P1: implementirana pravila (`firestore.rules`)
+
+- `get` na `households/{h}` i na vlastiti `members/{uid}` samo za aktivnog člana (`members/{auth.uid}` postoji i `enabled == true`, strogo boolean).
+- Nema `list`, nema nijednog klijentskog `write`, nema catch-all pravila; `locations/items/placements/appliedOps` i nepoznate putanje = implicitno DENY.
+- Onemogućeni član ne može čitati ni vlastiti membership. Brisanjem ili `enabled:false` članstva pristup se gubi pri sljedećem čitanju s poslužitelja.
+- Pisanje članstva samo kroz Firebase Console (Admin zaobilazi pravila).
+- Stvarni rezultati: `docs/P1_TEST_REPORT.md` (35 testova pravila PASS + provjera mutacijama).
+
+### Sigurnosni nalazi P1
+
+1. **Offline `getDoc` iz keša** moglo bi pokazati „odobren“ bez potvrde poslužitelja i preko odjave. Ispravljeno: `getDocFromServer`; pokriveno e2e testom E2E-9. Preostaje za P2 (vidi ARCHITECTURE).
+2. Firebase web konfiguracija nije tajna; zaštita je isključivo u pravilima. Dev-only kuka za emulator nije u produkcijskom bundleu (provjereno pretragom `dist`).
+3. Pravila nisu deployana; produkcijski deploy traži vlasnikovo odobrenje.
 
 ## P1: minimalni negativni testovi (emulator)
 
