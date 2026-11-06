@@ -21,7 +21,13 @@
     "check:no-actions": "node scripts/check-no-workflows.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-home-inventory-rules \"vitest run --config vitest.rules.config.ts\"",
     "check:all": "npm run check && npm run check:no-actions && npm run test:rules",
-    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-home-inventory-e2e \"node scripts/e2e-emulator.cjs\""
+    "test:e2e": "firebase emulators:exec --only auth,firestore --project demo-home-inventory-e2e \"node scripts/e2e-emulator.cjs\"",
+    "guard:env": "node scripts/prod-guard-cli.mjs env",
+    "guard:dist": "node scripts/prod-guard-cli.mjs dist",
+    "guard:rules": "node scripts/prod-guard-cli.mjs rules",
+    "build:prod": "npm run guard:env && npm run build && npm run guard:dist",
+    "deploy:rules": "npm run guard:rules && firebase deploy --only firestore:rules --project home-inventory-pwa-218be",
+    "deploy:hosting": "npm run build:prod && firebase deploy --only hosting --project home-inventory-pwa-218be"
   },
   "dependencies": {
     "firebase": "13.2.0",
