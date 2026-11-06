@@ -1,11 +1,29 @@
 rules_version = '2';
 
-// P0: ZAKLJUČANO — deny by default. Pravila članstva kućanstva implementira faza P1
-// (uz testove u Firebase Emulator Suite). Nikada `allow read, write: if true`.
+// P1: pristup kućanstvu samo za aktivne članove (members/{uid}.enabled == true).
+// Članstvo upisuje ISKLJUČIVO vlasnik kroz Firebase Console (Admin zaobilazi pravila);
+// klijent nema nikakav write nigdje. Sve ostalo je odbijeno (nema catch-all allow).
+// Google prijava sama NIJE autorizacija. Rules nisu filter upita: dopušten je samo `get`.
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+
+    function isActiveMember(householdId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid))
+        && get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)).data.get('enabled', false) == true;
+    }
+
+    match /households/{householdId} {
+      // Samo get (bez list) i samo aktivni član. Klijentski write zabranjen.
+      allow get: if isActiveMember(householdId);
+
+      match /members/{uid} {
+        // Aktivni član smije dohvatiti samo VLASTITI dokument. Bez list-a i bez write-a.
+        allow get: if isActiveMember(householdId) && request.auth.uid == uid;
+      }
+
+      // locations, items, placements, appliedOps i sve ostale putanje:
+      // namjerno bez pravila => implicitno DENY (P2/P3 uvode validirana pravila).
     }
   }
 }

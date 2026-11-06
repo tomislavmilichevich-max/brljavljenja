@@ -29,12 +29,13 @@ Ažurirano: 2026-11-06. Ovaj dokument određuje granice implementacije. Ne mijen
 6. Ne izmišljati rezultate testova. Razdvojiti PASS, FAIL, BLOCKED i NOT VERIFIED.
 7. Bez neodobrenih funkcionalnih promjena ili proširenja faze.
 
-## Trenutačno: P0 završen; P1 se provodi zasebno
+## Trenutačno: P0 završen; P1 implementiran u PR-u (čeka odobrenje)
 
 - P0 je kostur bez Firebase SDK-a i autentikacije. P0 ne predstavlja dokaz da rade inventar, online sinkronizacija, dva računa ili Drive.
 - P1 dokument: `docs/P1_HANDOFF.md`, testovi: `docs/P1_ACCEPTANCE.md`.
 - P1 = Google Auth, strogi Firestore ACL za dva ručno ovlaštena UID-a, emulator testovi i minimalni pilot UI.
-- P1 **ne smije** implementirati Item/Placement CRUD, pretragu, offline red konflikata, fotografije, NFC/QR, shopping listu ili konačni UI.
+- P1 je implementiran u grani `p1/auth-household-rules` (vidi `docs/P1_TEST_REPORT.md`); spajanje tek uz vlasnikovo odobrenje. P2 se ne počinje bez naloga.
+- P1 **nije** smio implementirati Item/Placement CRUD, pretragu, offline red konflikata, fotografije, NFC/QR, shopping listu ili konačni UI.
 - Sigurnosna pravila za buduće kolekcije ostaju deny-all do sljedeće faze.
 - Ne deployati ni mergeati bez izričitog odobrenja. Koristiti zasebnu granu i PR.
 

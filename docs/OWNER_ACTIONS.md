@@ -9,7 +9,27 @@ Ažurirano: 2026-11-06. Ne slati tokene, servisne račune, tajne ili stvarne fot
 - P0 **ne zahtijeva PR**; već je na `main`. Ovaj dokumentacijski paket dolazi kao zaseban PR za pregled.
 - Ne pokretati GitHub Actions dok je limit potrošen.
 
-## P1: Firebase — koraci tek kada Claude zatraži
+## P1: precizni koraci za Android tablet (Chrome, stranica „Desktop site“ za Firebase Console)
+
+Redom; ništa od ovoga ne zahtijeva karticu. **Ne slati UID-ove ni konfiguraciju u chat osim ako Claude izričito zatraži.**
+
+1. **Projekt:** console.firebase.google.com → _Add project_ → naziv po želji → _Google Analytics: isključi_ → Create. Plan mora ostati **Spark** (ne kliknuti _Upgrade_).
+2. **Prijava:** _Build → Authentication → Get started → Sign-in method → Google → Enable_ → odaberi support e-mail → Save.
+3. **Firestore:** _Build → Firestore Database → Create database_ → **Standard edition**, lokacija po izboru (ne mijenja se kasnije) → **Production mode** → Create. Ne dirati _Rules_ (deploy radimo tek uz odobrenje).
+4. **Web aplikacija:** _Project settings (zupčanik) → General → Your apps → Web (</>)_ → nadimak → **bez** „Firebase Hosting“ kvačice → Register. Kopiraj 6 vrijednosti `firebaseConfig`.
+5. **Konfiguracija u okruženje (ne u GitHub):** u Claude Code cloud okruženju postavi varijable okruženja `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID` i `VITE_HOUSEHOLD_ID` (npr. `kuca1`). Vrijednosti nisu tajne, ali ih se ne commita.
+6. **Autorizirane domene:** _Authentication → Settings → Authorized domains_ — dodaj domenu na kojoj će PWA biti objavljena (`<projekt>.web.app` i `<projekt>.firebaseapp.com` su obično već unutra). Bez toga Google prijava na toj domeni ne radi.
+7. **Prva prijava:** oba korisnika otvore objavljenu aplikaciju i prijave se (vidjet će „Nemaš pristup“ i svoj UID). _Napomena:_ stvarnu prijavu moguće je isprobati tek na objavljenoj domeni (P5 deploy uz tvoje odobrenje); lokalno u cloud okruženju to nije moguće.
+8. **UID-ovi:** _Authentication → Users → stupac User UID_ (ili kopiraj gumbom „Kopiraj UID“ u aplikaciji).
+9. **Kućanstvo (Console zapis zaobilazi pravila — samo ti):** _Firestore Database → Data → Start collection_ → Collection ID `households` → Document ID = tvoj `VITE_HOUSEHOLD_ID` → polja: `name` (string), `schemaVersion` (number) `1` → Save.
+10. **Članovi:** otvori taj dokument → _Add collection_ → ID `members` → Document ID = **UID prvog korisnika** → polja: `uid` (string, isti UID), `role` (string) `member`, `enabled` (**boolean**) `true` → Save. Ponovi za drugog korisnika. Polje `enabled` mora biti boolean, ne string „true“.
+    11a. Ako korisnik vidi „Tvoje članstvo postoji, ali dokument kućanstva nije postavljen“, nedostaje dokument `households/{id}` (korak 9) — pristup NIJE odobren dok se ne stvori.
+11. **Provjera:** korisnik na „Nemaš pristup“ pritisne _Provjeri ponovno_ → treba vidjeti „Pristup odobren“ i naziv kućanstva. **Opoziv:** promijeni `enabled` na `false` ili obriši člana. Otvorena aplikacija to primijeti pri povratku u prvi plan, kad se veza vrati, najkasnije nakon ≈10 min, ili pritiskom na „Provjeri pristup“; zatim prikazuje „Nemaš pristup“.
+12. Pravila: **ne deployati** sam. Kad odobriš, deploy radi samo `firestore.rules` (Spark, bez Blaze).
+
+Starije općenite korake zadržavamo ispod za referencu.
+
+## Stari opći koraci (referenca)
 
 1. Otvori https://console.firebase.google.com/ i izradi projekt s **Spark** (besplatnim) planom, **bez kartice / povezivanja billing računa**. Google Analytics nije potreban.
 2. Dodaj Web App u Project Settings. Postavi Google Authentication provider u Authentication → Sign-in method.

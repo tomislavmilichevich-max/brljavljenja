@@ -40,6 +40,8 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // Firebase Auth redirect/iframe (/__/auth/*) i /__/firebase/* uvijek idu na mrežu, nikad iz predmemorije.
+  if (url.pathname.startsWith('/__/')) return;
 
   if (req.mode === 'navigate') {
     // SPA: offline se uvijek vraća predmemorirani index.html.
