@@ -1,64 +1,51 @@
-# Kućni inventar PWA — tehnički pilot v0.0.1
+# Kućni inventar PWA — tehnički razvoj
 
-Privatna PWA za dva Android korisnika: **brzo pronaći gdje se predmet nalazi**.
-Trenutno stanje: **faza P0 (infrastruktura)**. Funkcionalnosti inventara, prijava i sinkronizacija
-**nisu implementirani** (P1+). Vidi `docs/PILOT_TEST_REPORT.md` za stvarno provjereno.
+Privatna PWA za **dva Android korisnika**. Glavni cilj: **brzo pronaći gdje se predmet nalazi u kući**.
 
-> Trošak: **0 EUR**. Samo Firebase Spark. Bez GitHub Actions. Vidi `CLAUDE.md`.
+**Repozitorij:** `tomislavmilichevich-max/home-inventory-pwa` (Private), `main`.
+**Trošak softvera i korištenja:** 0 €. Samo Firebase Spark. GitHub Actions nisu uključene.
 
-## Stack (stvarno instalirane verzije)
+## Status
 
-Vite 8.3.6 · React 19.3.1 · TypeScript 6.0.3 · Vitest 5.1.0 · ESLint 10.14 + typescript-eslint 8.72 · Prettier 3.9 · Node ≥ 20.19 (testirano na 22).
-Firebase SDK **još nije instaliran** (dolazi s P1). Service worker i manifest su ručno napisani (bez `vite-plugin-pwa`) da se izbjegne ovisnost.
+- **P0 implementiran:** Vite/React/TypeScript kostur, manifest, offline PWA ljuska, konfiguracijski predlošci, deny-all Firestore Rules.
+- **P1 spreman kao specifikacija, ali nije implementiran:** Google prijava + sigurnosna pravila za dva ovlaštena korisnika.
+- P2 inventar/pretraga, P3 offline konflikt, P4 Drive i P5 stvarni Android pilot **nisu implementirani**.
+- Izvještaj o testovima P0: `docs/PILOT_TEST_REPORT.md`; 14/14 Vitest prema izvještaju Claude Codea, offline Chromium app shell PASS. Fizički Android test **nije proveden**.
 
-## Pokretanje
+## Dokumenti za početak P1
 
-```bash
-npm install
-npm run dev            # razvojni poslužitelj (service worker je ISKLJUČEN u devu)
-npm run check          # typecheck + lint + test + build
-npm run build && npm run preview   # produkcijski build; tu se testira PWA/offline
-```
+1. `CLAUDE.md` — obavezne granice projekta.
+2. `docs/ARCHITECTURE.md` — poslovna pravila, Item + Placement, faze.
+3. `docs/SECURITY.md` — sigurnosni model.
+4. `docs/OWNER_ACTIONS.md` — što vlasnik mora napraviti na Android tabletu.
+5. `docs/UI_UX_DECISIONS_V0.1.md` — odobren Organized Cozy vizualni smjer, bez proširenja P1.
+6. `docs/P1_HANDOFF.md` — implementacijska specifikacija P1.
+7. `docs/P1_ACCEPTANCE.md` — prihvatni testovi P1.
+8. `docs/CLAUDE_CODE_P1_PROMPT.md` — početni prompt.
 
-Skripte: `typecheck`, `lint`, `format`, `format:check`, `test`, `test:watch`, `check:no-actions`.
+## Stack i pokretanje P0
 
-## Konfiguracija
-
-Kopiraj `.env.example` u `.env.local` i popuni vrijednostima iz Firebase Console (vidi `docs/OWNER_ACTIONS.md`).
-Firebase web konfiguracija nije tajna, ali se `.env*` ne commita; sigurnost daju Security Rules (P1).
-Bez konfiguracije aplikacija se normalno pokreće i prikazuje „nije postavljena“.
-
-## Struktura
-
-```
-src/app/        privremeni neutralni prikaz (nije dizajn)
-src/config/     čitanje/validacija javne Firebase konfiguracije
-src/pwa/        registracija SW-a + predložak service workera (sw.template.js)
-vite-plugins/   generira dist/sw.js s popisom datoteka i ID-jem builda
-public/         manifest.webmanifest, ikone (PRIVREMENE)
-firebase.json, firestore.rules (deny all), firestore.indexes.json, .firebaserc.example
-docs/           ARCHITECTURE, SECURITY, OWNER_ACTIONS, PILOT_TEST_REPORT
-```
-
-## PWA / offline (P0)
-
-`dist/sw.js` predmemorira statičku ljusku (HTML/JS/CSS/ikone/manifest) i vraća `index.html` za navigaciju bez mreže.
-Zahtjevi prema drugim domenama (Firestore, Google) i ne-GET zahtjevi **prolaze mrežom** — service worker ih ne dira.
-Nova verzija se preuzima u pozadini; aktivira se kad aplikacija pošalje `SKIP_WAITING` (UI za to dolazi kasnije).
-Ikone su privremene (generirane iz `public/icons/icon.svg`).
-
-## Deploy (samo Spark) — još se NE radi
-
-Nakon P1–P4 i izričitog odobrenja vlasnika:
+Vite 8.3.6 · React 19.3.1 · TypeScript 6.0.3 · Vitest 5.1.0 · ESLint 10.14 + typescript-eslint 8.72 · Prettier 3.9 · Node ≥20.19.
 
 ```bash
-npm run build
-npx firebase-tools deploy --only hosting,firestore:rules   # firebase-tools nije u ovisnostima; koristi se ad hoc
+npm ci
+npm run dev
+npm run check
+npm run check:no-actions
+npm run build && npm run preview
 ```
 
-Nikad `--only functions`, nikad nadogradnja na Blaze. Detalji i ručni koraci: `docs/OWNER_ACTIONS.md`.
+Firebase SDK **još nije** instaliran u P0. `.env.example` daje predložak javne konfiguracije; privatni `.env.local` nije za GitHub.
 
-## Poznata ograničenja
+Service worker u P0 predmemorira **samo ljusku aplikacije**, ne privatne podatke. Testovi offline prijave, inventara i Google Drivea tek dolaze.
 
-- Instalabilnost na stvarnom Androidu (Chrome „Dodaj na početni zaslon“) nije provjerena u P0.
-- `npm audit`: 1 umjerena ranjivost (minimatch, ReDoS) tranzitivno u lint alatima (dev-only, ne ulazi u build).
+## Zabranjena automatska objava
+
+Ne deployati Firebase Hosting/Firestore pravila i ne pokretati GitHub Actions bez zasebnog odobrenja vlasnika. Nikad Blaze, Cloud Functions, Firebase Storage ili App Hosting.
+
+Za ručne korake i dostupne opcije vidi `docs/OWNER_ACTIONS.md`.
+
+## Poznate P0 napomene
+
+- Stvarni Android PWA install i Google auth nisu provjereni.
+- Prema izvještaju P0: jedan umjereni `minimatch` ReDoS nalaz u development-only lint alatima; ne ulazi u produkcijski bundle. Pratiti nakon promjena ovisnosti.
