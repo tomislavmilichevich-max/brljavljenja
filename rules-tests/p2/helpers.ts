@@ -70,7 +70,14 @@ export const keyIdFor = (kind: 'unique' | 'type', itemId: string, locationId: st
   kind === 'unique' ? `${itemId}__unique` : `${itemId}__at__${locationId}`;
 
 /** Seed demo kuće ADMIN putem (zaobilazi pravila, kao Console). Samo u emulatoru. */
-export async function seedDemoHouse(env: RulesTestEnvironment): Promise<void> {
+export async function seedDemoHouse(
+  env: RulesTestEnvironment,
+  members: readonly (readonly [string, boolean])[] = [
+    [UID_A, true],
+    [UID_B, true],
+    [UID_OFF, false],
+  ],
+): Promise<void> {
   if (fixture.householdId !== 'demo-house' || !fixture.fixtureOnly)
     throw new Error('Neočekivan fixture');
   await env.clearFirestore();
@@ -80,11 +87,7 @@ export async function seedDemoHouse(env: RulesTestEnvironment): Promise<void> {
     const audit = { createdAt: now, updatedAt: now, createdBy: 'seed', updatedBy: 'seed' };
     const h = (p: string) => `households/${H}/${p}`;
     await setDoc(doc(db, `households/${H}`), fixture.household);
-    for (const [uid, enabled] of [
-      [UID_A, true],
-      [UID_B, true],
-      [UID_OFF, false],
-    ] as const)
+    for (const [uid, enabled] of members)
       await setDoc(doc(db, h(`members/${uid}`)), { uid, role: 'member', enabled });
     await setDoc(doc(db, 'households/other-house'), { name: 'Druga kuća', schemaVersion: 1 });
     await setDoc(doc(db, `households/other-house/members/${UID_OTHER}`), {
