@@ -42,7 +42,8 @@ const repo: InventoryRepository = {
   moveLocation: async () => {},
   createItemWithPlacement: async ({ attempt }) => {
     if (scenario === 'saving') return never();
-    if (scenario === 'unknown') throw new DomainError('outcome-unknown');
+    if (scenario === 'unknown' || scenario === 'notapplied')
+      throw new DomainError('outcome-unknown');
     return { itemId: attempt?.itemId ?? 'x', placementId: attempt?.placementId ?? 'y' };
   },
   updateItem: async () => {
@@ -52,7 +53,7 @@ const repo: InventoryRepository = {
   addPlacement: async () => ({ id: 'x' }),
   movePlacement: async () => {},
   archivePlacement: async () => {},
-  verify: async () => 'unknown',
+  verify: async () => (scenario === 'notapplied' ? 'not-applied' : 'unknown'),
 };
 
 const stateFor = (): InventoryState | null => {

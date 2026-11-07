@@ -889,6 +889,15 @@ describe('P2C-REV-01: session-scoped registar nerazriješenih pokušaja', () => 
     click('Provjeri stanje');
     await screen.findByTestId('verify-result');
     click('Odustani od pokušaja');
+    // potvrda s jasnim upozorenjem: zakašnjeli original može stići, ponovni unos može dati duplikat
+    const warn = screen.getByTestId('abandon-confirm').textContent ?? '';
+    expect(warn).toContain('zakašnjeli originalni upis još može doći');
+    expect(warn).toContain('duplikat');
+    click('Vrati se');
+    expect(screen.queryByTestId('abandon-confirm')).toBeNull();
+    expect(screen.getByTestId('inv-status')).toBeTruthy(); // ništa nije odbačeno
+    click('Odustani od pokušaja');
+    click('Odustani ipak');
     expect(screen.queryByTestId('inv-status')).toBeNull();
     t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
       itemId: attempt!.itemId,
