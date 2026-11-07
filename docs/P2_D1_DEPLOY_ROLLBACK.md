@@ -84,7 +84,13 @@ curl -sI https://home-inventory-pwa-218be.firebaseapp.com/ | head -5     # HTTP/
 curl -s  https://home-inventory-pwa-218be.firebaseapp.com/sw.js | head -c 200   # ne smije sadržavati API ključ
 ```
 
-Console → _Hosting → Release history_: zapiši novo izdanje (vrijeme, commit koji si zapisao u koraku 1).
+Provjera da u objavljenom paketu nema demo podataka (prije objave, nakon `build:prod`, ili na živoj adresi):
+
+```bash
+for w in 'Garaža' 'Špajza' 'Kuhinja' 'Regal' 'DEMO' 'simulat' 'fixture'; do printf "%s: " "$w"; grep -o "$w" dist/assets/*.js | wc -l; done   # sve mora biti 0
+```
+
+(`guard:dist` već odbija 17 demo markera; ovo je dodatna ručna provjera.) Console → _Hosting → Release history_: zapiši novo izdanje (vrijeme, commit koji si zapisao u koraku 1).
 
 ## 7. Kontrolirani početni bootstrap kućanstva (bez demo podataka) — _tek uz odobrenje_
 
@@ -95,19 +101,49 @@ Console → _Hosting → Release history_: zapiši novo izdanje (vrijeme, commit
 
 ## 8. Test na dva stvarna Android uređaja
 
-Slijedi `docs/P2_D1_ANDROID_PILOT_CHECKLIST.md` (svaka stavka ima očekivani rezultat i PASS/FAIL). Rezultate upiši u izvještaj; blokirajuća FAIL stavka = zaustavi test i razmotri povrat (korak 9).
+Slijedi `docs/P2_D1_ANDROID_PILOT_CHECKLIST.md` (svaka stavka ima očekivani rezultat i PASS/FAIL). Rezultate upiši u izvještaj; blokirajuća FAIL stavka = zaustavi test i razmotri povrat (korak 10).
 
-## 9. Povratak na prethodnu verziju
+## 9. Što se može, a što se NE može automatski vratiti
+
+| Što                                                                          | Vraća se?          | Kako / zašto                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kod aplikacije (Hosting)                                                     | **Da**, u trenutku | Console → Hosting → Release history → Rollback na izdanje zabilježeno u koraku 3 (ili ponovna objava prethodnog commita)                                                                             |
+| Firestore Rules                                                              | **Da**             | ponovna objava kopije iz koraka 3 (ili deny-all za hitno zaključavanje); trenutak od objave do povrata aplikacija radi s pravilima koja je tada imala                                                |
+| Podaci u Firestoreu (bootstrap, testni predmeti/lokacije/smještaji, izmjene) | **NE automatski**  | Spark plan nema sigurnosnih kopija ni vraćanja na točku u vremenu (zahtijevaju Blaze, a on je zabranjen); rollback koda/pravila **ne mijenja** zapise. Jedino ručno brisanje/ispravak u Console (9c) |
+| Posljedice zakašnjelog upisa (duplikat nakon odustajanja)                    | **NE automatski**  | ručno brisanje duplikata u Console ili u aplikaciji (P2 nema brisanje; vidi ograničenja)                                                                                                             |
+| Service worker/ljuska na uređajima                                           | Djelomično         | nova ljuska se povlači pri sljedećem otvaranju (`sw.js` je `no-cache`); inače očisti podatke web-mjesta                                                                                              |
+
+Posljedica: **prije koraka 7 (bootstrap) i svakog unosa podataka u `kuca1` treba biti jasno da se podaci ne mogu automatski vratiti.** Zato je bootstrap izričita, jednokratna radnja koja stvara samo dva dokumenta, a testni unosi se rade s unaprijed dogovorenim, zamjenjivim sadržajem (ne stvarnim popisom kuće) dok se P2-D2 ne ocijeni.
+
+## 10. Povratak na prethodnu verziju
 
 Odluka o povratu: vlasnik, uz glavni razvoj. Kriteriji: Google prijava ne radi, oštećenje/nedosljednost podataka, korisnik vidi tuđe/stare podatke, ne može se spremati zbog pravila, ili neprihvatljiv problem na Androidu.
 
-**9a. Hosting (aplikacija).** Preferirano: Console → _Hosting → Release history_ → uz izdanje iz koraka 3 → _Rollback_ (trenutno, bez builda). Alternativa iz Cloud Shella: `git checkout <prethodni-commit> && npm ci && npm run deploy:hosting`. Nakon povrata na uređajima: zatvori i ponovno otvori PWA (service worker se osvježava; `sw.js` je `no-cache`); ako ostane stara ljuska — Chrome → Postavke web-mjesta → Očisti podatke samo za ovu domenu (aplikacija nema trajnih privatnih podataka).
+**10a. Hosting (aplikacija).** Preferirano: Console → _Hosting → Release history_ → uz izdanje iz koraka 3 → _Rollback_ (trenutno, bez builda). Alternativa iz Cloud Shella: `git checkout <prethodni-commit> && npm ci && npm run deploy:hosting`. Nakon povrata na uređajima: zatvori i ponovno otvori PWA (service worker se osvježava; `sw.js` je `no-cache`); ako ostane stara ljuska — Chrome → Postavke web-mjesta → Očisti podatke samo za ovu domenu (aplikacija nema trajnih privatnih podataka).
 
-**9b. Pravila.** Vrati sadržaj kopije iz koraka 3: u privremenu mapu stavi kopiju kao `firestore.rules` i pokreni
+**10b. Pravila.** Vrati sadržaj kopije iz koraka 3: u privremenu mapu stavi kopiju kao `firestore.rules` i pokreni
 `npx firebase deploy --only firestore:rules --project home-inventory-pwa-218be`
 (ne radi to u glavnom klonu — tamo ostaje `firestore.rules` REV-04), ili Console → _Firestore → Rules_ → zalijepi kopiju → _Publish_.
 **Pažnja:** stara pravila **ne podržavaju** inventar (REV-04 aplikacija će prikazivati grešku/„samo pregled"); zato se pravila vraćaju zajedno s Hostingom iz 9a. **Hitno zaključavanje** (sumnja na curenje): Console → Rules → `rules_version = '2'; service cloud.firestore { match /databases/{database}/documents { match /{document=**} { allow read, write: if false; } } }` → Publish (aplikacija prestaje raditi, podaci su sigurni).
 
-**9c. Podaci.** Bootstrap i testni unosi su jedini zapisi inventara. Povrat podataka na „prazno": Console → `households/kuca1` → obriši dokumente u `placements`, `placementKeys`, `items`, `locations` (uključujući `root`) i `meta/tree` (brisanje kolekcije u Console briše sve njezine dokumente). **Ne brisati** `households/kuca1` ni `members`. Zatim ponovi korak 7 po potrebi. Brisanje radi isključivo vlasnik, nakon što potvrdi da se u kolekcijama ne nalazi ništa što treba zadržati.
+**10c. Podaci.** Bootstrap i testni unosi su jedini zapisi inventara. Povrat podataka na „prazno": Console → `households/kuca1` → obriši dokumente u `placements`, `placementKeys`, `items`, `locations` (uključujući `root`) i `meta/tree` (brisanje kolekcije u Console briše sve njezine dokumente). **Ne brisati** `households/kuca1` ni `members`. Zatim ponovi korak 7 po potrebi. Brisanje radi isključivo vlasnik, nakon što potvrdi da se u kolekcijama ne nalazi ništa što treba zadržati.
 
-**9d. Nakon povrata:** zapiši uzrok, vrijeme, što je vraćeno; ne ponavljaj objavu bez zasebnog odobrenja.
+**10d. Nakon povrata:** zapiši uzrok, vrijeme, što je vraćeno; ne ponavljaj objavu bez zasebnog odobrenja.
+
+## 11. Postupak u slučaju neuspjelog bootstrapa ili sigurnosnog problema
+
+**Neuspjeli ili nejasni bootstrap** (greška pri „Pripremi kućanstvo", ili Console pokazuje nešto osim `locations/root` + `meta/tree{rev:0}`):
+
+1. **Ne pokušavaj ponovno nasumično.** Zabilježi što aplikacija piše (zaslon, poruka) i vrijeme.
+2. Console → `households/kuca1`: što točno postoji? Ako postoji samo jedan od dokumenata (npr. `meta/tree` bez `locations/root`): ponovni pritisak na „Pripremi kućanstvo" je siguran (operacija je idempotentna — stvara samo ono što nedostaje). Ako aplikacija pokazuje „Podaci su nedosljedni" ili „Struktura lokacija nije ispravna": **ne mijenjaj iz aplikacije**; vlasnik ručno ispravlja u Console (obriši dokumente u `locations`/`meta` koje je stvorio bootstrap, ostavi `members` i `households/kuca1`), pa ponovi korak 7.
+3. Ako se ne uspije u 2 pokušaja: povrat (korak 10) i prijava glavnom razvoju s zapisom iz točke 1.
+
+**Sigurnosni problem** (korisnik vidi tuđe/stare podatke, nečlan vidi podatke, članstvo opozvano a podaci se i dalje prikazuju, sumnja na otvorena pravila):
+
+1. **Odmah zaključaj:** Console → Rules → deny-all (naredba u 10b) → Publish. Time aplikacija prestaje čitati/pisati; podaci su zaštićeni.
+2. Ne briši podatke prije nego što se utvrdi uzrok. Zabilježi: uređaj, račun (bez UID-a u chat), korake, vrijeme, snimku zaslona bez privatnog sadržaja.
+3. Provjeri članove: Console → `members` (tko je `enabled:true`), Authentication → Users.
+4. Hosting po potrebi na prethodno izdanje (10a). Nema nove objave bez zasebnog odobrenja i pregleda glavnog razvoja.
+5. Nakon utvrđenog uzroka i ispravka: ponovno objavi pravila REV-04 (korak 4) tek uz odobrenje.
+
+Sve izmjene u produkciji tijekom incidenta radi isključivo vlasnik; Claude Code/glavni razvoj ne dobivaju pristup računu.

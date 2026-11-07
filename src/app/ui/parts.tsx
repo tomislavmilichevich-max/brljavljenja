@@ -132,21 +132,37 @@ function RetryActions({
   onCheck: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const safe = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming) safe.current?.focus(); // fokus na SIGURNU radnju ("Vrati se"), nikad na destruktivnu
+  }, [confirming]);
   if (confirming)
     return (
-      <div role="group" aria-label="Potvrda odustajanja" data-testid="abandon-confirm">
+      <div
+        role="group"
+        aria-label="Potvrda odustajanja"
+        data-testid="abandon-confirm"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setConfirming(false); // zatvaranje = NE odustaje
+        }}
+      >
         <p>
-          <strong>Odustati od ovog pokušaja?</strong> Provjera nije dokazala da promjena nikad neće
-          stići: zakašnjeli originalni upis još može doći na poslužitelj. Ako odustaneš pa isti unos
-          upišeš ponovno, može nastati <strong>duplikat</strong>. Prije ponovnog unosa provjeri
-          pretragu.
+          <strong>Odustati od ovog pokušaja?</strong> Prethodna promjena možda ipak stigne na
+          poslužitelj: provjera nije dokazala da nikad neće stići. Ako odustaneš pa isti unos upišeš
+          ponovno, može nastati <strong>duplikat</strong>. Prije ponovnog unosa provjeri pretragu.
+          Odustajanje je tvoja svjesna odluka i ne može se poništiti.
         </p>
         <div className="actions">
+          <button
+            ref={safe}
+            type="button"
+            className="btn primary"
+            onClick={() => setConfirming(false)}
+          >
+            Vrati se
+          </button>
           <button type="button" className="btn coralbtn" onClick={onAbandon}>
             Odustani ipak
-          </button>
-          <button type="button" className="btn primary" onClick={() => setConfirming(false)}>
-            Vrati se
           </button>
         </div>
       </div>

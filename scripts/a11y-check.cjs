@@ -16,13 +16,21 @@ if (!fs.existsSync(AXE)) {
 const PORT = 5175;
 const BASE = `http://127.0.0.1:${PORT}/scripts/shots/shots.html`;
 const results = [];
+const AXE_STATS = { runs: 0, violationNodes: 0, rules: 0, sev: {}, incomplete: [] };
 const check = (name, ok, extra = '') => {
   results.push({ name, ok });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`);
 };
 const nav = (page, n) => page.getByTestId('bottom-nav').getByRole('button', { name: n }).click();
 
-async function axeRun(page, label) {
+async function axeRun(page, label, flat = false) {
+  if (flat) {
+    // axe ne može izmjeriti kontrast preko gradijenata (rezultat "incomplete"); uklanjamo gradijente najtamnijim krajem
+    await page.addStyleTag({
+      content:
+        'body{background:#faf7ef !important}.hero,.locationhero,.itemhero,.thumb{background:#f1e7d2 !important}',
+    });
+  }
   await page.addScriptTag({ path: AXE });
   const r = await page.evaluate(async () =>
     // eslint-disable-next-line no-undef
@@ -37,7 +45,14 @@ async function axeRun(page, label) {
     (x) =>
       `${x.id}(${x.nodes.length}${x.nodes[0] ? ':' + x.nodes[0].target.join(' ').slice(0, 50) : ''})`,
   );
-  check(`AXE ${label}`, v.length === 0, v.join(', '));
+  const inc = r.incomplete.map((x) => `${x.id}(${x.nodes.length})`);
+  AXE_STATS.runs++;
+  AXE_STATS.violationNodes += r.violations.reduce((n, x) => n + x.nodes.length, 0);
+  AXE_STATS.rules += r.passes.length;
+  for (const x of r.violations)
+    AXE_STATS.sev[x.impact] = (AXE_STATS.sev[x.impact] || 0) + x.nodes.length;
+  if (inc.length && !flat) AXE_STATS.incomplete.push(`${label}: ${inc.join(', ')}`);
+  check(`AXE ${label}${flat ? ' [plošna pozadina]' : ''}`, v.length === 0, v.join(', '));
 }
 
 (async () => {
@@ -135,6 +150,25 @@ async function axeRun(page, label) {
       'MODAL fokus se vraća na element koji je prije bio fokusiran',
       await page.evaluate(() => document.activeElement !== document.body),
     );
+
+    // 1b) isti zasloni s plošnom (najtamnijom) pozadinom: axe tada MJERI kontrast koji je inače "incomplete"
+    await page.keyboard.press('Escape');
+    await page
+      .getByRole('button', { name: 'Odbaci izmjene' })
+      .click()
+      .catch(() => {});
+    await open();
+    await axeRun(page, 'Početna', true);
+    await page.getByLabel('Pretraži predmet ili lokaciju').fill('baterije');
+    await axeRun(page, 'Pretraga', true);
+    await nav(page, 'Lokacije');
+    await axeRun(page, 'Lokacije', true);
+    await page.getByRole('button', { name: /Garaža/ }).click();
+    await axeRun(page, 'Sadržaj lokacije', true);
+    await nav(page, 'Dodaj predmet');
+    await axeRun(page, 'Dodaj predmet', true);
+    await nav(page, 'Više');
+    await axeRun(page, 'Više', true);
 
     // 3) tipkovnica: redoslijed, vidljiv fokus, nazivi kontrola
     await open();
@@ -354,6 +388,71 @@ async function axeRun(page, label) {
     );
     await page.setViewportSize({ width: 390, height: 780 });
 
+    // 4a) pristupačnost poruka o pogreškama
+    await open();
+    await nav(page, 'Dodaj predmet');
+    await page
+      .getByRole('form', { name: 'Novi predmet' })
+      .getByRole('button', { name: 'Dodaj predmet' })
+      .click();
+    const err = await page.evaluate(() => {
+      const el = document.getElementById('field-name');
+      const msg = document.getElementById('field-name-err');
+      return {
+        invalid: el.getAttribute('aria-invalid') === 'true',
+        described: (el.getAttribute('aria-describedby') || '')
+          .split(' ')
+          .includes('field-name-err'),
+        role: msg && msg.getAttribute('role'),
+        text: msg && msg.textContent,
+        focused: document.activeElement === el,
+      };
+    });
+    check(
+      'GREŠKE polja: aria-invalid, aria-describedby, role=alert, fokus na prvo neispravno polje',
+      err.invalid && err.described && err.role === 'alert' && err.focused,
+      JSON.stringify(err).slice(0, 120),
+    );
+    await open('conflict');
+    await page.getByLabel('Pretraži predmet ili lokaciju').fill('baterije');
+    await page
+      .getByRole('button', { name: /AA baterije/ })
+      .first()
+      .click();
+    await page.getByRole('button', { name: 'Uredi', exact: true }).click();
+    await page.getByLabel('Naziv predmeta *').fill('Drugi naziv');
+    await page.getByRole('button', { name: 'Spremi promjene' }).click();
+    await page.getByText(/Netko je promijenio zapis/).waitFor();
+    check(
+      'GREŠKE trake statusa: role=alert (čitač zaslona najavljuje) i sadržaj poruke',
+      (await page.getByTestId('inv-status').getAttribute('role')) === 'alert',
+    );
+    await axeRun(page, 'Traka greške (konflikt)');
+    await open('notapplied');
+    await nav(page, 'Dodaj predmet');
+    await page.getByLabel('Naziv predmeta *').fill('X');
+    await page.getByLabel('Lokacija *').selectOption({ label: 'Kuća › Garaža › Ormar s alatom' });
+    await page
+      .getByRole('form', { name: 'Novi predmet' })
+      .getByRole('button', { name: 'Dodaj predmet' })
+      .click();
+    await page.getByText(/Veza je prekinuta tijekom potvrđivanja/).waitFor();
+    await page.getByRole('button', { name: 'Provjeri stanje' }).click();
+    await page.getByTestId('verify-result').waitFor();
+    await axeRun(page, 'Traka nepoznatog ishoda (nije pronađeno)');
+    await page.getByRole('button', { name: 'Odustani od pokušaja' }).click();
+    await axeRun(page, 'Potvrda odustajanja');
+    check(
+      'ODUSTANI fokus je na sigurnoj radnji "Vrati se"',
+      (await page.evaluate(() => document.activeElement.textContent)) === 'Vrati se',
+    );
+    await page.keyboard.press('Escape');
+    check(
+      'ODUSTANI Escape zatvara potvrdu bez odustajanja',
+      (await page.getByTestId('abandon-confirm').count()) === 0 &&
+        (await page.getByRole('button', { name: 'Ponovi isti pokušaj' }).count()) === 1,
+    );
+
     // 4b) potpuno zatvaranje/osvježavanje aplikacije tijekom nepoznatog ishoda: registar je samo u memoriji
     await open('unknown');
     await nav(page, 'Dodaj predmet');
@@ -398,6 +497,13 @@ async function axeRun(page, label) {
       /* ugašen */
     }
   }
+  console.log(
+    `AXE-STAT zaslona/stanja=${AXE_STATS.runs} nalaza(čvorova)=${AXE_STATS.violationNodes} ozbiljnost=${JSON.stringify(AXE_STATS.sev)} prošlih pravila(zbroj)=${AXE_STATS.rules}`,
+  );
+  console.log(
+    'AXE-INCOMPLETE (zahtijeva ručnu provjeru; axe ne može odlučiti):',
+    AXE_STATS.incomplete.join(' | ') || 'nema',
+  );
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\nA11Y: ${results.length - failed}/${results.length} PASS`);
   process.exit(failed ? 1 : 0);

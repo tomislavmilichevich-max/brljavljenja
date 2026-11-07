@@ -109,7 +109,7 @@ textarea:focus-visible {
 }
 .small-status {
   font-size: 11px;
-  color: #847761;
+  color: #6b5f4b;
   margin-top: 2px;
 }
 .appview {
@@ -142,7 +142,7 @@ textarea:focus-visible {
 }
 .eyebrow {
   font-size: 11px;
-  color: #75845d;
+  color: #5a6a42;
   font-weight: 700;
   letter-spacing: 0.9px;
   text-transform: uppercase;
@@ -362,7 +362,7 @@ h3 {
 }
 .crumb {
   font-size: 12px;
-  color: #7d826f;
+  color: #5f6552;
   margin: 0 0 10px;
   line-height: 1.5;
 }
@@ -417,7 +417,7 @@ h3 {
   filter: drop-shadow(0 8px 4px #eee0c8);
 }
 .locationhero small {
-  color: #718068;
+  color: #4f5d49;
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 1px;
