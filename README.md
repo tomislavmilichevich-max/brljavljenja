@@ -35,7 +35,9 @@ npm run check:no-actions
 npm run build && npm run preview
 npm run test:rules     # Firestore Rules u emulatoru (traži Javu 21; bez mreže prema Firebaseu)
 npm run test:e2e       # e2e protiv Auth+Firestore emulatora (traži predinstalirani Playwright)
-npm run check:all      # check + no-actions + test:rules
+npm run test:sdk        # P2-B: pravi SDK + produkcijski moduli protiv Auth+Firestore emulatora
+npm run test:e2e:inventory   # P2-B: Chromium, dva korisnika, offline, IndexedDB (traži Playwright)
+npm run check:all      # check + no-actions + test:rules + test:sdk
 npm run guard:env|guard:dist|guard:rules   # P1.5 zaštitne provjere prije objave (ništa ne objavljuju)
 npm run build:prod     # guard:env → build → guard:dist (ispisuje točan popis datoteka za Hosting)
 npm run deploy:rules / deploy:hosting      # SAMO uz vlasnikovo odobrenje; fiksni projekt, uvijek --only
