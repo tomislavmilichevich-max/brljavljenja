@@ -4,6 +4,7 @@ rules_version = '2';
 // Članstvo i dokument kućanstva pišu se ISKLJUČIVO kroz Firebase Console (Admin zaobilazi pravila).
 // Klijentski upisi postoje samo za inventar (meta/tree, locations, items, placements, placementKeys)
 // i svaki mora proći strogu shemu + invarijante opisane u docs/P2_A_ADR.md.
+// Rules NE jamče potpunu acikličnost stabla (vidi noCycle); arhiviranje Location/Item je zabranjeno (D2).
 // Sve ostalo (npr. appliedOps — P3) nema pravilo => implicitno DENY. Nikad `if true`.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -77,25 +78,26 @@ service cloud.firestore {
 
     function validLocationCreate(h, id, d) {
       return validId(id) && locShape(d) && createAudit(d)
+        // kind 'house' ima ISKLJUČIVO root, a root je uvijek 'house'
         && (id == 'root'
           ? (d.parentId == null && d.kind == 'house')
-          : (validId(d.parentId) && d.parentId != id && get(locP(h, d.parentId)).data.archived == false));
+          : (d.kind != 'house' && validId(d.parentId) && d.parentId != id
+             && get(locP(h, d.parentId)).data.archived == false));
     }
 
+    // D1 (odluka glavnog razvoja): ovo je OGRANIČENA serverska provjera. Rules NE jamče acikličnost stabla
+    // neograničene dubine; potpuna provjera lanca predaka je obveza klijenta u transakciji (P2-B).
+    // D2: `archived` se na Location NE smije mijenjati (arhiviranje je odgođeno).
+    // `kind` je nepromjenjiv; prostorije (kind 'room') se ne premještaju; root se ne premješta.
     function validLocationUpdate(h, id, o, n) {
       return locShape(n) && updateAudit(o, n)
-        // root: nepromjenjiv položaj i ne arhivira se
-        && (o.parentId != null || (n.parentId == null && n.archived == false))
-        // promjena roditelja
+        && n.kind == o.kind
+        && n.archived == o.archived
         && (n.parentId == o.parentId
-          || (o.parentId != null && o.archived == false && n.archived == false
+          || (o.parentId != null && o.kind != 'room' && o.archived == false
               && validId(n.parentId) && noCycle(h, id, n.parentId)
               && get(locP(h, n.parentId)).data.archived == false
-              && treeBumped(h)))
-        // vraćanje iz arhive traži aktivnog roditelja (arhiviranje i premještanje ne idu u istom upisu)
-        && (n.archived == o.archived
-          || (n.parentId == o.parentId
-              && (n.archived == true || get(locP(h, n.parentId)).data.archived == false)));
+              && treeBumped(h)));
     }
 
     // ---------- Item ----------
@@ -108,12 +110,11 @@ service cloud.firestore {
         && d.aliases is list && d.aliases.size() <= 20 && d.aliases.join('|').size() <= 1600
         && optStr(d.category, 60) && optStr(d.note, 1000);
     }
+    // D2: `archived` se na Item NE smije mijenjati (arhiviranje je odgođeno); `kind` je nepromjenjiv.
     function validItemUpdate(h, id, o, n) {
       return itemShape(n) && updateAudit(o, n)
         && n.kind == o.kind
-        // arhiviranje jedinstvenog predmeta traži da njegov ključ smještaja više ne postoji nakon upisa
-        && (n.archived == o.archived || n.archived == false
-            || n.kind != 'unique' || !existsAfter(keyP(h, id + '__unique')));
+        && n.archived == o.archived;
     }
 
     // ---------- Placement + ključevi (jedinstvenost) ----------
