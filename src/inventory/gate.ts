@@ -13,6 +13,12 @@ export type InventoryState =
   | { status: 'ready'; data: InventoryData; needsBootstrap: boolean }
   /** Veza je pala nakon što je skup bio cjelovit: zadnji POTVRĐENI podaci, bez novih iz keša; pisanje onemogućeno. */
   | { status: 'stale'; data: InventoryData }
+  /**
+   * P2B-REV-03: cjelovit, server-potvrđen skup ima 0 lokacija, a ima predmeta i/ili smještaja. To NIJE prazno
+   * (nepripremljeno) kućanstvo nego nedosljedni podaci: bez prikaza, bez izmjena, bez ponude "pripremi kućanstvo".
+   * Stanje nosi samo brojeve, nikakve podatke.
+   */
+  | { status: 'inconsistent'; items: number; placements: number }
   /** D1: cjelovit, server-potvrđen skup lokacija je oštećen. Podaci se NE otkrivaju. */
   | { status: 'tree-corrupt'; problems: TreeProblem[] }
   | { status: 'error'; kind: 'offline' | 'unknown' }
@@ -67,9 +73,17 @@ export function createInventoryGate() {
 
     // Cjelovit, server-potvrđen skup: tek sada smije provjera integriteta (checkTreeIntegrity({complete:true})).
     if (locations.docs.length === 0) {
-      const data = { locations: [], items: items.docs, placements: placements.docs };
+      if (items.docs.length > 0 || placements.docs.length > 0) {
+        lastGood = null;
+        return {
+          status: 'inconsistent',
+          items: items.docs.length,
+          placements: placements.docs.length,
+        };
+      }
+      const data = { locations: [], items: [], placements: [] };
       lastGood = data;
-      return { status: 'ready', data, needsBootstrap: true };
+      return { status: 'ready', data, needsBootstrap: true }; // zaista prazno kućanstvo (sve tri kolekcije prazne)
     }
     const problems = findTreeProblems(locations.docs);
     if (problems.length) {

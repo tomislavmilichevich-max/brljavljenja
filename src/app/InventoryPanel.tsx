@@ -1,7 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { DomainError, isDomainError } from '../inventory/errors';
 import type { InventoryState } from '../inventory/gate';
-import { messageFor } from '../inventory/messages';
 import type { InventoryPort } from '../inventory/port';
 import { buildPath, isSameOrDescendant } from '../inventory/tree';
 import {
@@ -63,6 +61,13 @@ export function InventoryPanel({
           {state.kind === 'offline'
             ? 'Čeka se veza. Inventar nije potvrđen i ne prikazuje se.'
             : 'Inventar nije moguće učitati.'}
+        </p>
+      )}
+      {state.status === 'inconsistent' && (
+        <p role="alert" data-testid="inv-inconsistent">
+          Podaci su nedosljedni: nema nijedne lokacije, a postoje predmeti ({state.items}) ili
+          smještaji ({state.placements}). Ništa se ne prikazuje i ne mijenja, a priprema kućanstva
+          je isključena. Obavijesti vlasnika — ovo nije prazno kućanstvo.
         </p>
       )}
       {state.status === 'tree-corrupt' && (
@@ -222,10 +227,10 @@ function NewLocationForm({ ctx }: { ctx: Ctx }) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!ctx.writable) return; // Enter u polju ne smije zaobići onemogućeni gumb (stale/spremanje u tijeku)
-    const ok = await ctx.run('Nova lokacija', (r) =>
+    const res = await ctx.run('Nova lokacija', (r) =>
       r.createLocation({ name, parentId: effectiveParent, kind }),
     );
-    if (ok) setName('');
+    if (res.ok) setName(''); // unos se briše TEK nakon potvrđenog uspjeha
   };
   return (
     <form onSubmit={submit} aria-label="Nova lokacija">
@@ -357,31 +362,28 @@ function NewItemForm({ ctx }: { ctx: Ctx }) {
   const [name, setName] = useState('');
   const [kind, setKind] = useState<ItemKind>('type');
   const [loc, setLoc] = useState('');
+  const [formError, setFormError] = useState<string | null>(null);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!ctx.writable) return;
-    const ok = await ctx.run('Novi predmet', async (r) => {
-      const { id } = await r.createItem({ name, kind });
-      if (!loc) return;
-      try {
-        await r.addPlacement(id, loc);
-      } catch (err) {
-        if (isDomainError(err) && err.code === 'access-revoked') throw err;
-        throw new DomainError(
-          'invalid-input',
-          `Predmet je stvoren, ali smještaj NIJE spremljen. ${messageFor(err)}`,
-        );
-      }
-    });
-    if (ok !== undefined || name) setName('');
+    if (!ctx.writable) return; // Enter u polju ne smije zaobići onemogućeni gumb (stale/spremanje u tijeku)
+    // P2 handoff: naziv i početna lokacija su OBAVEZNI. Provjera i u obrascu (ne samo `required`), prije ikakvog poziva.
+    if (!name.trim()) return setFormError('Naziv predmeta je obavezan.');
+    if (!loc) return setFormError('Odaberi početnu lokaciju — predmet ne može nastati bez nje.');
+    setFormError(null);
+    // ATOMARNO (jedna transakcija): predmet + prvi smještaj + ključ. Nema "predmeta bez smještaja" nakon greške.
+    const res = await ctx.run('Novi predmet', (r) =>
+      r.createItemWithPlacement({ name, kind, locationId: loc }),
+    );
+    if (res.ok) setName(''); // neuspjeh (offline, neispravan unos, sukob...) NE smije obrisati korisnikov unos
   };
   return (
-    <form onSubmit={submit} aria-label="Novi predmet">
+    <form onSubmit={submit} aria-label="Novi predmet" noValidate>
       <input
         aria-label="Naziv predmeta"
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={120}
+        required
       />{' '}
       <select
         aria-label="Vrsta predmeta"
@@ -391,17 +393,28 @@ function NewItemForm({ ctx }: { ctx: Ctx }) {
         <option value="type">Vrsta (više lokacija)</option>
         <option value="unique">Jedinstveni (jedna lokacija)</option>
       </select>{' '}
-      <select aria-label="Početna lokacija" value={loc} onChange={(e) => setLoc(e.target.value)}>
-        <option value="">— bez lokacije —</option>
+      <select
+        aria-label="Početna lokacija"
+        value={loc}
+        onChange={(e) => setLoc(e.target.value)}
+        required
+      >
+        <option value="">— odaberi lokaciju (obavezno) —</option>
         {[...ctx.locs.values()].map((l) => (
           <option key={l.id} value={l.id}>
             {pathLabel(ctx.locs, l.id)}
           </option>
         ))}
       </select>{' '}
-      <button type="submit" disabled={!ctx.writable}>
+      <button type="submit" disabled={!ctx.writable || !name.trim() || !loc}>
         Dodaj predmet
       </button>
+      {!loc && <small data-testid="item-loc-hint"> Početna lokacija je obavezna.</small>}
+      {formError && (
+        <p role="alert" data-testid="item-form-error">
+          {formError}
+        </p>
+      )}
     </form>
   );
 }
