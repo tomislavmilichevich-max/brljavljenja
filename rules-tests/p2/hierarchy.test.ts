@@ -506,3 +506,114 @@ describe('MD-14 / ACL-29/30 nepromjenjiva i sistemska polja, tipovi', () => {
     await assertFails(b.commit());
   });
 });
+
+describe('P2-LOC-ROOM-01: prostorija (kind=room) smije imati isključivo parentId=root', () => {
+  const base = (uid = UID_A) => ({
+    version: 1,
+    archived: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdBy: uid,
+    updatedBy: uid,
+  });
+  const raw = (
+    db: ReturnType<typeof as>,
+    id: string,
+    parentId: string,
+    kind: string,
+    uid = UID_A,
+  ) => setDoc(loc(db, id), { ...base(uid), name: `Nova ${id}`, parentId, kind });
+
+  it('POZITIVNO: prostorija pod root dopuštena (sirovi upis i referentni protokol, A i B)', async () => {
+    await assertSucceeds(raw(as(env, UID_A), 'study', 'root', 'room'));
+    await assertSucceeds(
+      createLocation(as(env, UID_B), UID_B, {
+        id: 'attic',
+        name: 'Tavan',
+        parentId: 'root',
+        kind: 'room',
+      }),
+    );
+    expect(await parentOf('study')).toBe('root');
+    expect(await parentOf('attic')).toBe('root');
+  });
+  it('NEGATIVNO: prostorija pod ormarom, policom, ladicom, kutijom, "other" ili drugom prostorijom je ODBIJENA na serveru', async () => {
+    const db = as(env, UID_A);
+    for (const parent of [
+      'garage-tool',
+      'pantry-shelf',
+      'kitchen-drawer',
+      'garage-box',
+      'kitchen',
+      'garage',
+      'bedroom',
+    ]) {
+      await assertFails(raw(db, `room-under-${parent}`, parent, 'room'));
+    }
+    // "other" kao roditelj (stvorimo ga legitimno pa pokušamo prostoriju ispod njega)
+    await assertSucceeds(raw(db, 'misc', 'garage-tool', 'other'));
+    await assertFails(raw(db, 'room-under-misc', 'misc', 'room'));
+  });
+  it('NEGATIVNO: prostorija s nepostojećim ili nevaljanim roditeljem, bez roditelja ili pod sobom samom je odbijena', async () => {
+    const db = as(env, UID_A);
+    await assertFails(raw(db, 'r1', 'ne-postoji', 'room'));
+    await assertFails(raw(db, 'r2', 'root/../kitchen', 'room'));
+    await assertFails(raw(db, 'r3', 'r3', 'room'));
+    await assertFails(
+      setDoc(loc(db, 'r4'), { ...base(), name: 'Bez roditelja', parentId: null, kind: 'room' }),
+    );
+  });
+  it('NEGATIVNO: referentni protokol (P2-B mora isto) javlja room-parent prije pisanja i ništa ne zapisuje', async () => {
+    const db = as(env, UID_A);
+    await expect(
+      createLocation(db, UID_A, {
+        id: 'r5',
+        name: 'Soba u ormaru',
+        parentId: 'garage-tool',
+        kind: 'room',
+      }),
+    ).rejects.toMatchObject({ code: 'room-parent' });
+    await expect(
+      createLocation(db, UID_A, {
+        id: 'r6',
+        name: 'Soba u sobi',
+        parentId: 'kitchen',
+        kind: 'room',
+      }),
+    ).rejects.toMatchObject({ code: 'room-parent' });
+    expect((await getDoc(loc(db, 'r5'))).exists()).toBe(false);
+    expect((await getDoc(loc(db, 'r6'))).exists()).toBe(false);
+  });
+  it('prostorija se nakon stvaranja ne premješta (ni pod ormar, ni pod drugu prostoriju, ni natrag pod root)', async () => {
+    const db = as(env, UID_A);
+    await assertSucceeds(raw(db, 'study', 'root', 'room'));
+    for (const target of ['garage-tool', 'kitchen', 'living-tv']) {
+      const b = writeBatch(db);
+      b.update(loc(db, 'study'), {
+        parentId: target,
+        version: 2,
+        updatedAt: serverTimestamp(),
+        updatedBy: UID_A,
+      });
+      b.update(doc(db, `households/${H}/meta/tree`), { rev: 1 });
+      await assertFails(b.commit());
+    }
+    expect(await parentOf('study')).toBe('root');
+  });
+  it('ostali tipovi NISU ograničeni novim pravilom: ormar/polica/ladica/kutija/other smiju pod root i ugniježđeno prema dosadašnjim pravilima', async () => {
+    const db = as(env, UID_A);
+    await assertSucceeds(raw(db, 'k-root-cabinet', 'root', 'cabinet'));
+    await assertSucceeds(raw(db, 'k-root-other', 'root', 'other'));
+    await assertSucceeds(raw(db, 'k-shelf', 'k-root-cabinet', 'shelf'));
+    await assertSucceeds(raw(db, 'k-box', 'k-shelf', 'box'));
+    await assertSucceeds(raw(db, 'k-drawer', 'k-root-cabinet', 'drawer'));
+    await assertSucceeds(raw(db, 'k-other-nested', 'k-box', 'other'));
+    await assertSucceeds(raw(db, 'k-cabinet-in-room', 'living', 'cabinet'));
+    await assertSucceeds(raw(db, 'k-cabinet-in-cabinet', 'k-cabinet-in-room', 'cabinet'));
+  });
+  it('postojeća premještanja ne-prostorija i dalje rade (pozitivna kontrola)', async () => {
+    const db = as(env, UID_A);
+    await assertSucceeds(moveLocation(db, UID_A, 'garage-box', 'living-tv'));
+    await assertSucceeds(moveLocation(db, UID_A, 'garage-rack', 'kitchen'));
+  });
+});

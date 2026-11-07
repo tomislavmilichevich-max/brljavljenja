@@ -148,6 +148,7 @@ export async function createLocation(
   return explainDenied(db, () =>
     runTransaction(db, async (tx) => {
       const parent = await tx.get(ref(db, `locations/${d.parentId}`));
+      if (d.kind === 'room' && d.parentId !== 'root') throw new DomainError('room-parent'); // P2-LOC-ROOM-01
       if (!parent.exists() || parent.data().archived) throw new DomainError('bad-parent');
       tx.set(ref(db, `locations/${d.id}`), {
         name: d.name,
@@ -392,4 +393,21 @@ export function findTreeProblems(locs: LocNode[]): TreeProblem[] {
     for (const id of path) state.set(id, 2);
   }
   return problems;
+}
+
+// ---------------------------------------------------------------- potpunost snapshota (obveza P2-B)
+export type TreeCheck =
+  { status: 'incomplete' } | { status: 'ok' } | { status: 'corrupt'; problems: TreeProblem[] };
+
+/**
+ * P2-B OBVEZA: provjera integriteta stabla smije se pokrenuti TEK nad CJELOVITIM skupom lokacija, tj. kad je
+ * stigao cijeli server-potvrđeni snapshot kolekcije (ne djelomični/prvi dio, ne keš, ne skup s lokalnim
+ * nepotvrđenim upisima). Na djelomičnom skupu roditelj može jednostavno još nedostajati pa bi `missing-parent`
+ * bio LAŽNA uzbuna. Dok skup nije cjelovit, ishod je 'incomplete' (UI: učitavanje), nikad 'corrupt'.
+ * Pozivatelj određuje `complete`; ako ne može biti siguran, mora proslijediti false.
+ */
+export function checkTreeIntegrity(locs: LocNode[], snapshot: { complete: boolean }): TreeCheck {
+  if (!snapshot.complete) return { status: 'incomplete' };
+  const problems = findTreeProblems(locs);
+  return problems.length ? { status: 'corrupt', problems } : { status: 'ok' };
 }
