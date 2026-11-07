@@ -100,7 +100,7 @@ Prvi prolaz pozitivnih slučajeva pao je jer je `jq -r` na kraj sadržaja pravil
 
 Spremiti dolje navedenu skriptu kao `harness.sh` i iz korijena klona pokrenuti `bash harness.sh` (zadani `DOC`/`REALRULES` su `docs/P2_D1_DEPLOY_ROLLBACK.md` i `firestore.rules` u trenutnom direktoriju). Ne dira mrežu ni produkciju.
 
-````bash
+```bash
 #!/bin/bash
 # Negativni/pozitivni testovi zaštita iz docs/P2_D1_DEPLOY_ROLLBACK.md s LAŽNIM podacima.
 # Git je stvarni (nad lažnim repozitorijem u privremenom HOME-u); npm/npx/gcloud/curl su STUBOVI koji samo bilježe pozive.
@@ -282,4 +282,3 @@ echo "Stvarni deploy nije pozvan ni u jednom slučaju (npm/npx su stubovi; DEPLO
 rm -rf "${ROOT:?}"
 [ "$FAILN" = 0 ]
 ```
-````
