@@ -47,6 +47,16 @@ async function signInAs(page, _ctx, name) {
 }
 
 (async () => {
+  // zaštita: ako je port 5173 zauzet starim poslužiteljem, testovi bi tiho pogađali krivi projekt
+  if (
+    await fetch(BASE).then(
+      () => true,
+      () => false,
+    )
+  ) {
+    console.log('FAIL  port 5173 je zauzet (zaostali dev poslužitelj) — ugasi ga i ponovi');
+    process.exit(2);
+  }
   const vite = spawn('npx', ['vite', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], {
     env: {
       ...process.env,
@@ -59,6 +69,7 @@ async function signInAs(page, _ctx, name) {
       VITE_USE_EMULATORS: 'true',
     },
     stdio: 'ignore',
+    detached: true, // vlastita grupa procesa: kill(-pid) ubija i npx i vite (inače ostaje zaostali poslužitelj)
   });
   const browser = await chromium.launch();
   try {
@@ -214,7 +225,11 @@ async function signInAs(page, _ctx, name) {
     check('E2E izvršavanje', false, String(e).split('\n')[0]);
   } finally {
     await browser.close();
-    vite.kill();
+    try {
+      process.kill(-vite.pid);
+    } catch {
+      /* već ugašen */
+    }
   }
   const failed = results.filter((r) => !r.ok).length;
   console.log(`\nE2E: ${results.length - failed}/${results.length} PASS`);

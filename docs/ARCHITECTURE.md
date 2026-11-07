@@ -81,6 +81,14 @@ households/{householdId}
 
 Shema, invarijante, odgovori na pitanja iz P2 handoffa i alternative: `docs/P2_A_ADR.md`. Dokazi: `docs/P2_A_TEST_REPORT.md`. Uvedene su dvije pomoćne kolekcije (`meta/tree` za serijalizaciju strukture, `placementKeys` za jedinstvenost) uz nepromijenjene stabilne ID-ove Placementa. Rules NE jamče potpunu acikličnost stabla: P2-B mora imati potpunu provjeru lanca predaka u transakciji i detekciju oštećenog stabla nakon učitavanja (D1). Arhiviranje Location/Item je odgođeno i zabranjeno u pravilima (D2). Sve izmjene u P2-B moraju ići isključivo kroz `runTransaction` (setDoc/updateDoc/writeBatch ulaze u skriveni offline red — izmjereno).
 
+## P2-B — online inventar (implementirano u emulatorima)
+
+Podatkovni sloj (`src/inventory/*`), izolirane podatkovne sesije (`src/firebase/dataSession.ts`) i minimalno sučelje. Detalji i dokazi: `docs/P2_B_TEST_REPORT.md`.
+
+- Svaka prijavljena sesija otvara **zasebnu Firebase app instancu** (samo memorijski keš, Auth bez perzistencije); odjava, promjena računa i opoziv uništavaju je (listeneri + keš). Primarna instanca nema Firestore.
+- Sve izmjene su `runTransaction`; bez veze odbijene (`offline`), pad veze oko commita daje `outcome-unknown`. Nema skrivenog reda ni automatskog slanja.
+- Podaci se otkrivaju i integritet stabla provjerava tek nad cjelovitim, server-potvrđenim skupom svih triju kolekcija.
+
 ## Faze i razgraničenja
 
 | Faza | Opseg                                                          | Status                                                                                      |

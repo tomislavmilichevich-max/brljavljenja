@@ -1,3 +1,4 @@
+import type { InventoryPort } from '../inventory/port';
 /** Minimalni podaci o prijavljenom korisniku (UID nije tajna). */
 export interface SessionUser {
   uid: string;
@@ -37,4 +38,6 @@ export interface AccessPort {
 export interface Services {
   auth: AuthPort;
   access: AccessPort;
+  /** P2-B: izolirane podatkovne sesije inventara. */
+  data: InventoryPort;
 }

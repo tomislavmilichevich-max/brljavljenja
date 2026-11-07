@@ -74,6 +74,10 @@ Detalji i dokazi: `docs/P2_A_ADR.md`, `docs/P2_A_TEST_REPORT.md` (pravila sha256
 - `appliedOps` (P3) i sve nepoznato: DENY. Članstvo/kućanstvo: nepromijenjeno iz P1.
 - **Odluke (revizija 2):** acikličnost je **ograničeno** provjerena na serveru (udaljenost ≤ 6) i Rules je NE jamče; potpunu provjeru lanca predaka u transakciji i detekciju oštećenog stabla mora imati P2-B (D1). Arhiviranje Location i Item je zabranjeno u pravilima (D2); `Location.kind` je nepromjenjiv, samo `root` je `house`, prostorije (`room`) smiju imati isključivo roditelja `root` i ne premještaju se (P2-LOC-ROOM-01). Opoziv članstva razlikuje se od konflikta (D5). Pravila (sha256 `d73cb80ba712`) se ne smiju deployati prije P2-B klijenta i odobrenja.
 
+## P2-B: podaci na klijentu (implementirano u emulatorima, nije objavljeno)
+
+Dokazi: `docs/P2_B_TEST_REPORT.md` §4–§6. Sažetak: izolirana podatkovna sesija po korisniku (memorijski keš, Auth bez perzistencije, uništava se pri odjavi/promjeni računa/opozivu); u Chromium IndexedDB-u nema Firestore keša ni tokena podatkovnih sesija; upisi samo online kroz transakcije (ESLint + test politike); opoziv ≠ konflikt (`access-revoked`); oštećeno stablo ⇒ bez prikaza podataka. Otvoreno: Android i produkcija NOT VERIFIED; opoziv bez promjene podataka oslanja se na revalidaciju iz P1.
+
 ## Granice P3 (još nije implementirano)
 
 Firestore lokalni cache podržava offline čitanje/upis, ali „last write wins“ nije dovoljan za istodobno premještanje predmeta. Online transakcija mora provjeriti `baseVersion`; `operationId` i ažuriranje trebaju atomsku idempotenciju. Sigurnosna pravila moraju posebno štititi reference i sistemska polja. Ovu logiku **ne implementirati u P1**.
