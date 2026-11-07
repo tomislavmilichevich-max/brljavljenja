@@ -146,7 +146,7 @@ describe('sessionReducer — revalidacija tijekom otvorene sesije (P1-REV-02)', 
 describe('sessionReducer — opoziv iz podatkovnog sloja (P2-B)', () => {
   it('revoked iz member => denied bez podataka kućanstva', () => {
     const s = sessionReducer(member({ householdName: 'Tajno' }), { type: 'revoked', uid: 'uidA' });
-    expect(s).toEqual({ phase: 'denied', user: A });
+    expect(s).toEqual({ phase: 'denied', user: A, revoked: true });
     expect(JSON.stringify(s)).not.toContain('Tajno');
   });
   it('revoked za drugog korisnika ili izvan member stanja se ignorira', () => {

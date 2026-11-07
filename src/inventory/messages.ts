@@ -4,27 +4,27 @@ import { isDomainError, type DomainCode } from './errors';
 export const ERROR_MESSAGES: Record<DomainCode, string> = {
   'access-revoked': 'Pristup kućanstvu više nije odobren.',
   'changed-elsewhere':
-    'Promijenjeno na drugom uređaju. Podaci su osvježeni — provjeri i pokušaj ponovno. Promjena NIJE spremljena.',
+    'Netko je promijenio zapis. Nismo prepisali tuđu promjenu. Tvoja promjena NIJE spremljena, a unos je sačuvan.',
   'duplicate-placement':
-    'Taj predmet već postoji na toj lokaciji (ili je jedinstveni predmet već smješten). Promjena NIJE spremljena.',
-  cycle: 'Lokacija se ne može premjestiti unutar same sebe ili svojih podlokacija.',
-  'room-immovable': 'Prostorije se ne premještaju.',
-  'room-parent': 'Prostorija može biti samo izravno u kući (root).',
-  'same-parent': 'Lokacija je već tamo.',
-  'same-location': 'Predmet je već na toj lokaciji.',
-  'bad-parent': 'Nadređena lokacija ne postoji ili nije aktivna.',
-  'bad-item': 'Predmet ne postoji ili nije aktivan.',
-  'bad-location': 'Lokacija ne postoji ili nije aktivna.',
-  'not-found': 'Zapis više ne postoji.',
+    'Ovaj predmet već je evidentiran na toj lokaciji (ili je jedinstveni predmet već smješten). Promjena NIJE spremljena.',
+  cycle: 'Odabrano mjesto nalazi se unutar premještane lokacije.',
+  'room-immovable': 'Prostoriju nije moguće premještati.',
+  'room-parent': 'Prostorija može biti samo neposredno u Kući.',
+  'same-parent': 'Već se nalazi ovdje.',
+  'same-location': 'Već se nalazi ovdje.',
+  'bad-parent': 'Odabrana lokacija ili predmet više nije dostupan. Provjeri stanje.',
+  'bad-item': 'Odabrana lokacija ili predmet više nije dostupan. Provjeri stanje.',
+  'bad-location': 'Odabrana lokacija ili predmet više nije dostupan. Provjeri stanje.',
+  'not-found': 'Odabrana lokacija ili predmet više nije dostupan. Provjeri stanje.',
   'corrupt-tree': 'Stablo lokacija je oštećeno. Premještanje je onemogućeno.',
   'not-bootstrapped': 'Kućanstvo još nije pripremljeno. Pritisni „Pripremi kućanstvo".',
   offline:
     'Trenutačno nije moguće spremiti. Provjeri vezu. Promjena NIJE spremljena i neće se poslati naknadno.',
   'outcome-unknown':
-    'Veza je pala dok se promjena potvrđivala. Ishod je NEPOZNAT: promjena je možda spremljena. Kad se veza vrati, provjeri prikaz prije ponovnog pokušaja.',
-  contention: 'Previše istodobnih izmjena. Pokušaj ponovno. Promjena NIJE spremljena.',
+    'Veza je prekinuta tijekom potvrđivanja. Promjena je možda spremljena; ishod je NEPOZNAT. Provjeri stanje prije novog pokušaja.',
+  contention: 'Trenutačno mnogo izmjena. Pokušaj kasnije. Promjena NIJE spremljena.',
   'invalid-input': 'Neispravan unos.',
-  unknown: 'Promjena nije spremljena zbog neočekivane greške.',
+  unknown: 'Promjena nije spremljena zbog neočekivane greške. Unos je sačuvan.',
 };
 
 export function messageFor(e: unknown): string {
