@@ -87,7 +87,8 @@ Podatkovni sloj (`src/inventory/*`), izolirane podatkovne sesije (`src/firebase/
 
 - Svaka prijavljena sesija otvara **zasebnu Firebase app instancu** (samo memorijski keš, Auth bez perzistencije); odjava, promjena računa i opoziv uništavaju je (listeneri + keš). Primarna instanca nema Firestore.
 - Sve izmjene su `runTransaction`; bez veze odbijene (`offline`), pad veze oko commita daje `outcome-unknown`. Nema skrivenog reda ni automatskog slanja.
-- Podaci se otkrivaju i integritet stabla provjerava tek nad cjelovitim, server-potvrđenim skupom svih triju kolekcija.
+- Podaci se otkrivaju i integritet stabla provjerava tek nad cjelovitim, server-potvrđenim skupom svih triju kolekcija. Nula lokacija uz postojeće predmete/smještaje je `inconsistent`, a ne "nepripremljeno kućanstvo".
+- Predmet nastaje isključivo atomarno s početnom lokacijom (`createItemWithPlacement`: Item + Placement + ključ u jednoj transakciji; naziv i lokacija obavezni).
 
 ## Faze i razgraničenja
 

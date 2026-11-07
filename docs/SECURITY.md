@@ -78,6 +78,10 @@ Detalji i dokazi: `docs/P2_A_ADR.md`, `docs/P2_A_TEST_REPORT.md` (pravila sha256
 
 Dokazi: `docs/P2_B_TEST_REPORT.md` §4–§6. Sažetak: izolirana podatkovna sesija po korisniku (memorijski keš, Auth bez perzistencije, uništava se pri odjavi/promjeni računa/opozivu); u Chromium IndexedDB-u nema Firestore keša ni tokena podatkovnih sesija; upisi samo online kroz transakcije (ESLint + test politike); opoziv ≠ konflikt (`access-revoked`); oštećeno stablo ⇒ bez prikaza podataka. Otvoreno: Android i produkcija NOT VERIFIED; opoziv bez promjene podataka oslanja se na revalidaciju iz P1.
 
+## P2B-REV-04: atomarno stvaranje predmeta (izmjena pravila, nije deployana)
+
+Pravila za stvaranje smještaja i ključa čitaju predmet kroz `getAfter()` (stanje nakon upisa), pa se Item, prvi Placement i ključ mogu stvoriti u jednoj transakciji. Sigurnosno je neutralno jer su `kind` i `archived` predmeta nepromjenjivi (D2). Jedinstvenost smještaja, limiti pristupa dokumentima i sve ranije invarijante ostaju (200 prethodnih testova prolazi nepromijenjeno). Pravila (sha256 `157feee0f7ca`) se moraju objaviti prije ili zajedno s aplikacijom; ništa nije objavljeno. Detalji: `docs/P2_B_TEST_REPORT.md` §8.
+
 ## Granice P3 (još nije implementirano)
 
 Firestore lokalni cache podržava offline čitanje/upis, ali „last write wins“ nije dovoljan za istodobno premještanje predmeta. Online transakcija mora provjeriti `baseVersion`; `operationId` i ažuriranje trebaju atomsku idempotenciju. Sigurnosna pravila moraju posebno štititi reference i sistemska polja. Ovu logiku **ne implementirati u P1**.
