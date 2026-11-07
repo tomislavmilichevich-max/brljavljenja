@@ -1,6 +1,6 @@
 # P2_A_TEST_REPORT — model Location + Item + Placement, pravila i testovi
 
-Datum: 2026-11-07 · Grana: `p2a/data-model-rules` (iz `docs/p2-inventory-handoff-2026-11-07`, tj. PR #6) · Okruženje: Claude Code cloud (Linux, Node 22.23.4, Java 21, firebase-tools 15.35.0, firebase 13.2.0)
+Datum: 2026-11-07 · Grana: `p2a/data-model-rules` (razvijana na dokumentacijskoj grani PR #6; nakon njegova spajanja `main` je spojen u granu, diff prema `main` sadrži samo P2-A datoteke) · Okruženje: Claude Code cloud (Linux, Node 22.23.4, Java 21, firebase-tools 15.35.0, firebase 13.2.0)
 Testirana pravila: `firestore.rules`, **sha256 `b998f2269754`**, 216 linija. Statusi: **PASS** · **PARTIAL** (djelomično, objašnjeno) · **FAIL** · **BLOCKED** · **NOT VERIFIED** · **NOT STARTED**.
 
 **Ukupni status P2-A: PARTIAL — pravila i dokazi su gotovi; jedna stroga invarijanta (potpuna acikličnost bez ograničenja dubine) NIJE izvediva samo s Rules i čeka odluku glavnog razvoja (D1 u `docs/P2_A_ADR.md`).** Ništa nije deployano. U produkcijsko `households/kuca1` ništa nije upisano. Demo kuća koristi se isključivo u izoliranim emulatorima (`demo-…` projekti).
