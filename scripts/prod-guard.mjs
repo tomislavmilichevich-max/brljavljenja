@@ -110,16 +110,36 @@ export function manifestOf(files) {
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
-/** Pravila: bez `if true`, mora imati verziju; vraća hash za usporedbu s testiranima. */
+// Jedine putanje koje pravila smiju sadržavati (P1 + P2-A). Nova putanja traži svjesnu izmjenu ovdje.
+export const ALLOWED_MATCHES = Object.freeze([
+  '/databases/{database}/documents',
+  '/households/{householdId}',
+  '/members/{uid}',
+  '/meta/{docId}',
+  '/locations/{locationId}',
+  '/items/{itemId}',
+  '/placements/{placementId}',
+  '/placementKeys/{keyId}',
+]);
+
+/**
+ * Pravila: verzija 2, bez `if true`, bez rekurzivnog wildcarda, SVAKI `allow` mora zahtijevati aktivnog člana
+ * (isActiveMember), i samo poznate putanje. Vraća popis problema.
+ */
 export function checkRules(text) {
   const problems = [];
   const code = text.replace(/\/\/.*$/gm, '');
   if (!/rules_version\s*=\s*'2'/.test(code)) problems.push("nedostaje rules_version = '2'");
   if (/allow[^;]*:\s*if\s+true\b/.test(code)) problems.push('pravila sadrže "allow … if true"');
   if (/\{[A-Za-z_]*=\*\*\}/.test(code))
-    problems.push('rekurzivni wildcard match ({x=**}) nije dopušten u P1');
-  if (/allow\s+(?:[a-z]+,\s*)*(create|update|delete|write)\b/.test(code))
-    problems.push('pravila sadrže klijentski write (P1 ga ne dopušta)');
+    problems.push('rekurzivni wildcard match ({x=**}) nije dopušten');
+  for (const m of code.matchAll(/allow\s+([^:]+):\s*if\s+([\s\S]*?);/g)) {
+    if (!m[2].includes('isActiveMember('))
+      problems.push(`allow ${m[1].trim()} ne zahtijeva isActiveMember`);
+  }
+  for (const m of code.matchAll(/\bmatch\s+(\/[^\s{][^\s]*|\/\{[^\s]*)\s*\{/g)) {
+    if (!ALLOWED_MATCHES.includes(m[1])) problems.push(`nepoznata putanja u pravilima: ${m[1]}`);
+  }
   return problems;
 }
 

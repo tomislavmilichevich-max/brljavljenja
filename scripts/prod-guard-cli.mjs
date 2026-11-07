@@ -47,7 +47,7 @@ if (mode === 'env') {
   const problems = checkRules(text);
   if (problems.length) fail(problems);
   console.log(
-    `OK: firestore.rules (sha256 ${rulesHash(text)}) bez "if true" i bez klijentskog write-a.`,
+    `OK: firestore.rules (sha256 ${rulesHash(text)}) bez "if true", svaki allow traži aktivnog člana, samo poznate putanje.`,
   );
 } else {
   console.error('Upotreba: prod-guard-cli.mjs <env|dist|rules>');

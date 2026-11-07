@@ -100,17 +100,32 @@ describe('manifestOf', () => {
 describe('checkRules', () => {
   const good = `rules_version = '2';
 service cloud.firestore { match /databases/{database}/documents {
-  match /households/{h} { allow get: if request.auth != null; } } }`;
-  it('P1 pravila (get only) prolaze', () => {
+  function isActiveMember(h) { return request.auth != null; }
+  match /households/{householdId} { allow get: if isActiveMember(householdId);
+    match /items/{itemId} { allow create, update: if isActiveMember(householdId) && true == true; } } } }`;
+  it('pravila s upisima koji traže člana i poznatim putanjama prolaze', () => {
     expect(checkRules(good)).toEqual([]);
   });
-  it('allow … if true, wildcard i klijentski write se odbijaju', () => {
-    expect(checkRules(good.replace('request.auth != null', 'true')).join()).toContain('if true');
+  it('allow … if true, wildcard i upis bez provjere članstva se odbijaju', () => {
+    expect(checkRules(good.replace('isActiveMember(householdId);', 'true;')).join()).toContain(
+      'if true',
+    );
     expect(checkRules(good + ' match /{document=**} { allow read: if false; }').join()).toContain(
       'wildcard',
     );
-    expect(checkRules(good.replace('allow get', 'allow get, write')).join()).toContain('write');
-    expect(checkRules(good.replace('allow get', 'allow create')).join()).toContain('write');
+    expect(
+      checkRules(
+        good.replace(
+          'allow create, update: if isActiveMember(householdId) && true == true;',
+          'allow write: if request.auth != null;',
+        ),
+      ).join(),
+    ).toContain('ne zahtijeva isActiveMember');
+  });
+  it('nepoznata putanja (npr. novi kolekcijski match) se odbija', () => {
+    expect(
+      checkRules(good.replace('match /items/{itemId}', 'match /secrets/{id}')).join(),
+    ).toContain('nepoznata putanja');
   });
   it('komentar s "if true" ne daje lažni alarm', () => {
     expect(checkRules('// nikad allow read: if true\n' + good)).toEqual([]);
