@@ -1,7 +1,7 @@
 # P2_A_TEST_REPORT — model Location + Item + Placement, pravila i testovi
 
 Datum: 2026-11-07 · Grana: `p2a/data-model-rules` (razvijana na dokumentacijskoj grani PR #6; nakon njegova spajanja `main` je spojen u granu, diff prema `main` sadrži samo P2-A datoteke) · Okruženje: Claude Code cloud (Linux, Node 22.23.4, Java 21, firebase-tools 15.35.0, firebase 13.2.0)
-Testirana pravila (revizija 2): `firestore.rules`, **sha256 `c141f0dda1dd`**. Prethodna verzija (PR #7): `b998f2269754`. Statusi: **PASS** · **PARTIAL** (djelomično, objašnjeno) · **FAIL** · **BLOCKED** · **NOT VERIFIED** · **NOT STARTED**.
+Testirana pravila (revizija 3): `firestore.rules`, **sha256 `d73cb80ba712`**. Prethodne verzije: rev. 2 `c141f0dda1dd` (PR #8), rev. 1 `b998f2269754` (PR #7). Statusi: **PASS** · **PARTIAL** (djelomično, objašnjeno) · **FAIL** · **BLOCKED** · **NOT VERIFIED** · **NOT STARTED**.
 
 **Ukupni status P2-A: ODOBRENO UZ UVJETE (odluke D1–D5 glavnog razvoja). Revizija 2 (ovaj PR) provodi korekcije; vidi §7.** Potpuna acikličnost nije zajamčena Rules-ima (D1) — ograničena serverska provjera + obvezni protokol i detekcija u P2-B. Ništa nije deployano; u produkcijsko `households/kuca1` ništa nije upisano.
 
@@ -14,10 +14,10 @@ Testirana pravila (revizija 2): `firestore.rules`, **sha256 `c141f0dda1dd`**. Pr
 | `npm run build`                                                       | PASS (JS 770.6 kB, gzip 235.3 kB — nepromijenjeno)                         |
 | `npm run check:no-actions`                                            | PASS                                                                       |
 | `npm run guard:rules`                                                 | PASS (`b998f2269754`)                                                      |
-| `npm run test:rules` (Firestore emulator)                             | **PASS — 10 datoteka, 187 testova, 0 palih** (revizija 2)                  |
+| `npm run test:rules` (Firestore emulator)                             | **PASS — 11 datoteka, 200 testova, 0 palih** (revizija 3)                  |
 | `npm run test:e2e` (P1 regresija, Auth+Firestore emulatori, Chromium) | **PASS 14/14**                                                             |
 
-Rules testovi po datoteci (revizija 2): `firestore.rules.test.ts` 36 · `p2/acl` 35 · `p2/concurrency` 13 · `p2/depth` 16 · `p2/fixture` 7 · `p2/hierarchy` 32 · `p2/offline` 3 · `p2/placements` 25 · `p2/platform-limits` 6 · `p2/revocation` 14.
+Rules testovi po datoteci (revizija 3): `firestore.rules.test.ts` 36 · `p2/acl` 36 · `p2/concurrency` 13 · `p2/depth` 16 · `p2/fixture` 7 · `p2/hierarchy` 39 · `p2/offline` 3 · `p2/placements` 25 · `p2/platform-limits` 6 · `p2/revocation` 14 · `p2/tree-completeness` 5.
 Stabilnost: `test:rules` pokrenut 3× zaredom (141/141 prije dodatka MD-08), `concurrency` 6× (13/13), `depth` 10× (4/4) — vidi §4 za nalaz o treperenju. Cijeli skup od 147 testova pokrenut završno jednom (147/147).
 
 ## 2. Prihvatna matrica (`docs/P2_ACCEPTANCE.md`)
@@ -115,3 +115,17 @@ Testovi koje je trebalo prepisati jer je politika promijenjena (ne zato što su 
 **Nove greške u vlastitim testovima, ispravljene:** barijera za dvoje u testu u kojem A baca `cycle` prije točke preklapanja (timeout, ne greška pravila).
 **Otvoreno / pitanje glavnom razvoju:** handoff kaže "prostorije su djeca root-a", ali pravila to **ne** nameću pri kreiranju (kreiranje prostorije ispod ormara bilo bi moguće, a kasnije je nepomično). Nisam dodao to pravilo jer nije traženo; fixture ga zadovoljava. Treba li?
 **Nije provjereno:** produkcijsko ponašanje pravila/limita, Android, naplata čitanja unutar pravila. Ništa nije deployano.
+
+## 8. Revizija 3 — P2-LOC-ROOM-01 i potpunost snapshota (`p2a/room-parent-rule`)
+
+| Zahtjev                                                  | Provedba                                                                                         | Dokaz                                                                                                                                                                                                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `room` smije imati isključivo `parentId = root` (server) | `firestore.rules`: pri kreiranju `d.kind != 'room' \|\| d.parentId == 'root'`                    | 7 novih testova u `hierarchy`: pozitivno (pod root, A i B, sirovi upis i protokol); negativno (pod ormarom, policom, ladicom, kutijom, „other", drugom prostorijom, nepostojećim/nevaljanim roditeljem, bez roditelja, pod sobom); mutacija **M17** |
+| Prostorija se ne premješta                               | već u rev. 2                                                                                     | ponovljeno za 3 odredišta                                                                                                                                                                                                                           |
+| Ostali tipovi neograničeni novim pravilom                | bez promjene                                                                                     | pozitivni testovi (ormar/other pod root, polica/kutija/ladica/other ugniježđeno, ormar u prostoriji i u ormaru)                                                                                                                                     |
+| P2-B poštuje isto pravilo                                | referentni protokol: `room-parent`; obveza 7 u ADR-u                                             | test „referentni protokol javlja room-parent prije pisanja"                                                                                                                                                                                         |
+| Integritet stabla samo nad cjelovitim skupom             | `checkTreeIntegrity(locs, { complete })` — `incomplete` dok skup nije cjelovit; obveza 8 u ADR-u | `tree-completeness` 5 testova: djelomičan skup ⇒ `incomplete` (a da je provjera pokrenuta, bila bi lažna uzbuna `missing-parent`), prazan/jednočlani ⇒ `incomplete`, cjelovit zdrav ⇒ `ok`, cjelovit s ciklusom ⇒ `corrupt`                         |
+
+Izlazi (revizija 3): `typecheck`/`lint` OK · Vitest 83/83 · build OK · `check:no-actions` OK · `guard:rules` OK (`d73cb80ba712`) · `test:rules` **200/200**, 3 pokretanja zaredom · `test:e2e` (P1) 14/14 · mutacije ACL-31: **17**. Svi prethodni testovi (D1–D5) prolaze nepromijenjeni; nijedan nije izmijenjen ni uklonjen.
+**Napomena:** `complete` u `checkTreeIntegrity` je isključivo odgovornost pozivatelja (P2-B); kako P2-B definira "cjelovit" (npr. prvi server-potvrđeni snapshot bez `fromCache` i bez `hasPendingWrites`) još nije implementirano i nije testirano na pravom SDK listeneru.
+**Nije provjereno:** produkcijsko ponašanje pravila, Android. Ništa nije deployano; P2-B nije započet.
