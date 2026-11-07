@@ -99,7 +99,9 @@ describe('promjena računa na istom uređaju (isti primarni Auth)', () => {
     expect(revoked.status).toBe('revoked');
     expect(statesC.some((s) => s.status === 'ready' || s.status === 'stale')).toBe(false); // nikakvi podaci
     await expect(fromCache(C.session.db)).rejects.toBeTruthy(); // ni nakon listenera
-    await expect(C.repo.createItem({ name: 'x', kind: 'type' })).rejects.toMatchObject({
+    await expect(
+      C.repo.createItemWithPlacement({ name: 'x', kind: 'type', locationId: 'garage-tool' }),
+    ).rejects.toMatchObject({
       code: 'access-revoked',
     });
     unC();
