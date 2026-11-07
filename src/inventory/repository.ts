@@ -60,9 +60,9 @@ export const newCreateAttempt = (): CreateAttempt => ({ itemId: newId(), placeme
  * i usporedbom IDENTITETA/VERZIJE objekta — nikad po nazivu. Nikad ne ponavlja upis.
  */
 export type VerifySpec =
-  | { op: 'createItem'; itemId: string; placementId: string }
+  | { op: 'createItem'; itemId: string; placementId: string; locationId: string }
   | { op: 'createLocation'; id: string }
-  | { op: 'addPlacement'; itemId: string; locationId: string }
+  | { op: 'addPlacement'; itemId: string; locationId: string; placementId: string }
   | { op: 'updateItem'; id: string; expectedVersion: number; patch: ItemPatch }
   | { op: 'renameLocation'; id: string; expectedVersion: number; name: string }
   | { op: 'moveLocation'; id: string; expectedVersion: number; newParentId: string }
@@ -106,7 +106,16 @@ export interface InventoryRepository {
     attempt?: CreateAttempt;
   }): Promise<{ itemId: string; placementId: string; alreadyExisted?: boolean }>;
   updateItem(id: string, patch: ItemPatch, expectedVersion: number): Promise<void>;
-  addPlacement(itemId: string, locationId: string): Promise<{ id: string }>;
+  /**
+   * P2C-REV-02: `placementId` (neobavezno) = unaprijed određen, stabilan ID pokušaja. Ponovni poziv s istim ID-em je
+   * idempotentan (isti Placement + njegov ključ već postoje => ništa se ne piše). Pravila jedinstvenosti (`unique`/`type`)
+   * ostaju: tuđi ključ na istoj lokaciji daje `duplicate-placement`, nikad "uspjeh" našeg pokušaja.
+   */
+  addPlacement(
+    itemId: string,
+    locationId: string,
+    placementId?: string,
+  ): Promise<{ id: string; alreadyExisted?: boolean }>;
   movePlacement(id: string, newLocationId: string, expectedVersion: number): Promise<void>;
   archivePlacement(id: string, expectedVersion: number): Promise<void>;
   /** Samo čitanje, server-potvrđeno; ne mijenja ništa i ne ponavlja nijedan upis. */
@@ -361,6 +370,7 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
               existingItem.exists() &&
               existingPl.exists() &&
               existingPl.data().itemId === itemId &&
+              existingPl.data().locationId === locationId && // P2C-REV-01: i očekivana lokacija, ne samo itemId/kind
               existingItem.data().kind === kind
             ) {
               alreadyExisted = true;
@@ -418,20 +428,38 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
       );
     },
 
-    async addPlacement(itemId, locationId) {
+    async addPlacement(itemId, locationId, placementId) {
       const hooks = once();
-      const id = newId();
+      const id = placementId ?? newId();
+      let alreadyExisted = false;
       await run(
         (mark) =>
           commitTx(mark, async (tx) => {
-            const [item, loc] = await Promise.all([
+            alreadyExisted = false;
+            const [item, loc, existing] = await Promise.all([
               tx.get(ref(`items/${itemId}`)),
               tx.get(ref(`locations/${locationId}`)),
+              tx.get(ref(`placements/${id}`)),
             ]);
             if (!item.exists() || item.data().archived) throw new DomainError('bad-item');
-            if (!loc.exists() || loc.data().archived) throw new DomainError('bad-location');
             const kid = keyIdFor(item.data().kind, itemId, locationId);
             const key = await tx.get(ref(`placementKeys/${kid}`));
+            if (existing.exists()) {
+              // idempotentni ponovni pokušaj: ISTI Placement (ID, predmet, lokacija) i NJEGOV ključ => ništa se ne piše
+              const d = existing.data();
+              if (
+                d.itemId === itemId &&
+                d.locationId === locationId &&
+                !d.archived &&
+                key.exists() &&
+                key.data().placementId === id
+              ) {
+                alreadyExisted = true;
+                return;
+              }
+              throw new DomainError('unknown', 'ID pokušaja je već zauzet drugim zapisom.');
+            }
+            if (!loc.exists() || loc.data().archived) throw new DomainError('bad-location');
             if (key.exists()) throw new DomainError('duplicate-placement');
             await hooks.afterReads?.();
             tx.set(ref(`placements/${id}`), {
@@ -457,7 +485,7 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           return key.exists() ? new DomainError('duplicate-placement') : null;
         },
       );
-      return { id };
+      return alreadyExisted ? { id, alreadyExisted } : { id };
     },
 
     async movePlacement(id, newLocationId, expectedVersion) {
@@ -536,7 +564,10 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           if (!it || !pl) return 'unknown';
           if (!it.exists() && !pl.exists()) return 'not-applied';
           // identitet: oba zapisa moraju postojati i biti povezana ID-evima pokušaja (ne uspoređuje se naziv)
-          return it.exists() && pl.exists() && pl.data().itemId === spec.itemId
+          return it.exists() &&
+            pl.exists() &&
+            pl.data().itemId === spec.itemId &&
+            pl.data().locationId === spec.locationId
             ? 'applied'
             : 'changed-elsewhere';
         }
@@ -546,14 +577,29 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           return s.exists() ? 'applied' : 'not-applied';
         }
         case 'addPlacement': {
-          const item = await read(`items/${spec.itemId}`);
-          if (!item) return 'unknown';
+          // P2C-REV-02: provjerava se KONKRETNI Placement našeg pokušaja i NJEGOV ključ, ne samo postojanje ključa
+          const [pl, item] = await Promise.all([
+            read(`placements/${spec.placementId}`),
+            read(`items/${spec.itemId}`),
+          ]);
+          if (!pl || !item) return 'unknown';
           if (!item.exists()) return 'changed-elsewhere';
           const key = await read(
             `placementKeys/${keyIdFor(item.data().kind as ItemKind, spec.itemId, spec.locationId)}`,
           );
           if (!key) return 'unknown';
-          return key.exists() ? 'applied' : 'not-applied';
+          if (pl.exists()) {
+            const d = pl.data();
+            return d.itemId === spec.itemId &&
+              d.locationId === spec.locationId &&
+              d.archived !== true &&
+              key.exists() &&
+              key.data().placementId === spec.placementId
+              ? 'applied'
+              : 'changed-elsewhere';
+          }
+          // našeg Placementa nema: ako ključ postoji, smještaj je prvi stvorio netko drugi — NIJE naš pokušaj
+          return key.exists() ? 'changed-elsewhere' : 'not-applied';
         }
         case 'updateItem': {
           const patch: Record<string, unknown> = {};
