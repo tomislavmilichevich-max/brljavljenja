@@ -72,7 +72,7 @@ Detalji i dokazi: `docs/P2_A_ADR.md`, `docs/P2_A_TEST_REPORT.md` (pravila sha256
 - `locations`, `items`, `placements`, `meta/tree`: čitanje samo aktivnom članu; upis samo uz strogu shemu, `version + 1`, serverska vremena i `auth.uid`; bez tvrdog brisanja.
 - Jedinstvenost smještaja kroz `placementKeys` (create/delete, nikad update); strukturne promjene stabla serijalizirane CAS-om na `meta/tree.rev`.
 - `appliedOps` (P3) i sve nepoznato: DENY. Članstvo/kućanstvo: nepromijenjeno iz P1.
-- **Otvoreno:** potpuna acikličnost bez ograničenja dubine nije izvediva u Rules (server provjerava do udaljenosti 6) i arhiviranje lokacije/tip-predmeta sa sadržajem je samo klijentska provjera — odluke D1/D2 čekaju glavni razvoj. Pravila se ne smiju deployati prije P2-B klijenta i odobrenja.
+- **Odluke (revizija 2):** acikličnost je **ograničeno** provjerena na serveru (udaljenost ≤ 6) i Rules je NE jamče; potpunu provjeru lanca predaka u transakciji i detekciju oštećenog stabla mora imati P2-B (D1). Arhiviranje Location i Item je zabranjeno u pravilima (D2); `Location.kind` je nepromjenjiv, samo `root` je `house`, prostorije se ne premještaju. Opoziv članstva razlikuje se od konflikta (D5). Pravila (sha256 `c141f0dda1dd`) se ne smiju deployati prije P2-B klijenta i odobrenja.
 
 ## Granice P3 (još nije implementirano)
 

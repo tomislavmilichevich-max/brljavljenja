@@ -77,9 +77,9 @@ households/{householdId}
 3. **Gate za P2/P3 (nalaz glavnog razvoja, NIJE implementirano):** `getDocFromServer` je ispravan fail-closed potez za _mrežno potvrđenu autorizaciju_ u P1, ali **ne smije postati trajni preduvjet za lokalnu offline pretragu** prethodno sinkroniziranog inventara. Prije P2 treba definirati razdvajanje: (a) mrežno potvrđena autorizacija (server, Security Rules) i (b) ograničen offline pristup lokalnim podacima na prethodno odobrenom, pouzdanom Androidu, uz **izolaciju/čišćenje lokalnog keša pri odjavi i promjeni računa** (Security Rules štite server, a lokalna predmemorija traži zasebnu zaštitu). Online provjera članstva ne smije trajno onemogućiti offline pretragu; opoziv se primjenjuje kad se provjera uspješno obavi, a lokalni podaci se tada brišu.
 4. Bundle je narastao na ≈235 kB gzip (Firebase auth+firestore). Za P2+ razmotriti code-splitting.
 
-## P2-A — model i pravila (u emulatoru, čeka odluke D1–D5)
+## P2-A — model i pravila (u emulatoru; D1–D5 odlučeni, revizija 2)
 
-Shema, invarijante, odgovori na pitanja iz P2 handoffa i alternative: `docs/P2_A_ADR.md`. Dokazi: `docs/P2_A_TEST_REPORT.md`. Uvedene su dvije pomoćne kolekcije (`meta/tree` za serijalizaciju strukture, `placementKeys` za jedinstvenost) uz nepromijenjene stabilne ID-ove Placementa. Sve izmjene u P2-B moraju ići isključivo kroz `runTransaction` (setDoc/updateDoc/writeBatch ulaze u skriveni offline red — izmjereno).
+Shema, invarijante, odgovori na pitanja iz P2 handoffa i alternative: `docs/P2_A_ADR.md`. Dokazi: `docs/P2_A_TEST_REPORT.md`. Uvedene su dvije pomoćne kolekcije (`meta/tree` za serijalizaciju strukture, `placementKeys` za jedinstvenost) uz nepromijenjene stabilne ID-ove Placementa. Rules NE jamče potpunu acikličnost stabla: P2-B mora imati potpunu provjeru lanca predaka u transakciji i detekciju oštećenog stabla nakon učitavanja (D1). Arhiviranje Location/Item je odgođeno i zabranjeno u pravilima (D2). Sve izmjene u P2-B moraju ići isključivo kroz `runTransaction` (setDoc/updateDoc/writeBatch ulaze u skriveni offline red — izmjereno).
 
 ## Faze i razgraničenja
 
