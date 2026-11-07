@@ -109,6 +109,10 @@ const navBtn = (name: string) =>
   within(screen.getByTestId('bottom-nav')).getByRole('button', { name }) as HTMLButtonElement;
 const click = (name: string | RegExp) => fireEvent.click(screen.getByRole('button', { name }));
 const btn = (name: string | RegExp) => screen.getByRole('button', { name }) as HTMLButtonElement;
+const addSubmit = () =>
+  within(screen.getByRole('form', { name: 'Novi predmet' })).getByRole('button', {
+    name: /Dodaj predmet|Spremanje/,
+  }) as HTMLButtonElement;
 const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
 async function openItem(name: string, via: 'search' | 'rooms' = 'search') {
   if (via === 'search') {
@@ -199,13 +203,16 @@ describe('stanja: učitavanje, vrata i integritet', () => {
       const b = screen.queryByRole('button', { name: label }) as HTMLButtonElement | null;
       if (b) expect(b.disabled).toBe(true);
     }
-    expect(navBtn('Dodaj predmet').disabled).toBe(true);
+    expect(navBtn('Dodaj predmet').disabled).toBe(false); // obrazac se smije otvoriti (nacrt), ali ne i spremiti
+    tab('Dodaj predmet');
+    expect(addSubmit().disabled).toBe(true);
   });
   it('browser offline (online=false): samo pregled, bez spremanja', async () => {
     const t = await setup({ online: false });
     await t.push(ready);
     expect(screen.getByTestId('inv-offline')).toBeTruthy();
-    expect(navBtn('Dodaj predmet').disabled).toBe(true);
+    tab('Dodaj predmet');
+    expect(addSubmit().disabled).toBe(true);
   });
 });
 
@@ -389,7 +396,7 @@ describe('nepoznat ishod (outcome-unknown) i provjera stanja', () => {
     expect(screen.queryByText(/Spremljeno · potvrđeno online/)).toBeNull();
     expect(screen.getByTestId('inv-status').textContent).not.toMatch(/NIJE spremljena/);
     expect(field('Naziv predmeta *').value).toBe('Čekić');
-    expect(navBtn('Dodaj predmet').disabled).toBe(true);
+    expect(addSubmit().disabled).toBe(true);
     expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1);
     expect(t.repo.verify).not.toHaveBeenCalled(); // provjera je IZRIČITA korisnička radnja
   });
@@ -404,21 +411,26 @@ describe('nepoznat ishod (outcome-unknown) i provjera stanja', () => {
       op: 'createItem',
       itemId: attempt.itemId,
       placementId: attempt.placementId,
+      locationId: 'garage',
     });
     expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1); // nikad automatsko ponavljanje
   });
-  it('not-applied: poruka "nije pronađena", unos sačuvan, ponovni pokušaj IZRIČIT i s ISTIM ID-evima', async () => {
+  it('not-applied: ne dokazuje budućnost; nema spremanja iz obrasca; "Ponovi isti pokušaj" koristi ISTE ID-eve i parametre', async () => {
     const t = await unknownCreate();
     click('Provjeri stanje');
     await screen.findByTestId('verify-result');
     expect(screen.getByTestId('verify-result').textContent).toContain('NIJE pronađena');
+    expect(screen.getByTestId('verify-result').textContent).toContain('ne dokazuje');
     expect(field('Naziv predmeta *').value).toBe('Čekić');
+    expect(addSubmit().disabled).toBe(true); // nerazriješen: novi upis blokiran
+    const first = vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0];
     t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
       itemId: attempt!.itemId,
       placementId: attempt!.placementId,
     }));
-    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    click('Ponovi isti pokušaj');
     await waitFor(() => expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0]).toEqual(first);
   });
   it('provjera bez veze: ostaje neodređeno ("unknown"), nema zaključka', async () => {
     const t = await unknownCreate();
@@ -552,7 +564,9 @@ describe('premještanje i smještaji', () => {
     click(/Dodaj drugi smještaj/);
     expect((screen.getByTestId('dest-pantry') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId('dest-garage'));
-    await waitFor(() => expect(t.repo.addPlacement).toHaveBeenCalledWith('salt', 'garage'));
+    await waitFor(() =>
+      expect(t.repo.addPlacement).toHaveBeenCalledWith('salt', 'garage', expect.any(String)),
+    );
   });
   it('predmet bez smještaja: kontrolirani oporavak "Dodaj smještaj"', async () => {
     const t = await setup();
@@ -774,5 +788,162 @@ describe('nepoznat ishod pri uređivanju i odlasku s obrasca', () => {
     expect(screen.getByTestId('bottom-nav').closest('[inert]')).not.toBeNull();
     click('Ostani ovdje');
     expect(screen.getByTestId('bottom-nav').closest('[inert]')).toBeNull();
+  });
+});
+
+describe('P2C-REV-01: session-scoped registar nerazriješenih pokušaja', () => {
+  async function unknownCreate(loc = 'garage') {
+    const t = await setup();
+    await t.push(ready);
+    t.repo.createItemWithPlacement = vi.fn(async () => {
+      throw new DomainError('outcome-unknown');
+    });
+    tab('Dodaj predmet');
+    fireEvent.change(field('Lokacija *'), { target: { value: loc } });
+    fireEvent.change(field('Naziv predmeta *'), { target: { value: 'Čekić' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    return t;
+  }
+  const firstCall = (t: Awaited<ReturnType<typeof setup>>) =>
+    vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0];
+
+  it('odlazak s obrasca na drugu karticu i povratak: pokušaj, ID-evi i provjera ostaju dostupni', async () => {
+    const t = await unknownCreate();
+    tab('Lokacije');
+    tab('Više');
+    tab('Početna');
+    expect(screen.getByText(/Veza je prekinuta tijekom potvrđivanja/)).toBeTruthy();
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    const spec = vi.mocked(t.repo.verify).mock.calls[0]![0];
+    expect(spec).toMatchObject({
+      op: 'createItem',
+      itemId: firstCall(t).attempt!.itemId,
+      locationId: 'garage',
+    });
+  });
+  it('promjena lokacije u (ponovno otvorenom) obrascu NE mijenja pokušaj: ponavljanje šalje izvornu lokaciju i iste ID-eve', async () => {
+    const t = await unknownCreate('garage');
+    const first = firstCall(t);
+    tab('Lokacije');
+    tab('Dodaj predmet');
+    fireEvent.change(field('Lokacija *'), { target: { value: 'pantry' } });
+    expect(addSubmit().disabled).toBe(true); // forma ne može pokrenuti drugi pokušaj
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
+      itemId: attempt!.itemId,
+      placementId: attempt!.placementId,
+    }));
+    click('Ponovi isti pokušaj');
+    await waitFor(() => expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1));
+    const again = vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0];
+    expect(again.locationId).toBe('garage');
+    expect(again.name).toBe(first.name);
+    expect(again.attempt).toEqual(first.attempt);
+  });
+  it('nema automatskog novog pokušaja nakon nepoznatog ishoda (ni nakon navigacije, ni nakon provjere)', async () => {
+    const t = await unknownCreate();
+    tab('Lokacije');
+    tab('Dodaj predmet');
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1);
+  });
+  it('dva predmeta ISTOG naziva: provjera/ponavljanje odnose se na ID-eve pokušaja, ne na naziv', async () => {
+    const t = await unknownCreate();
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied'); // postoji drugi "Čekić", ali nije naš
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
+      itemId: attempt!.itemId,
+      placementId: attempt!.placementId,
+    }));
+    click('Ponovi isti pokušaj');
+    await screen.findByText(/Spremljeno · potvrđeno online/);
+    expect(vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0].name).toBe('Čekić');
+  });
+  it('zakašnjeli commit: ponavljanje koje vrati alreadyExisted je uspjeh (bez duplikata, bez greške)', async () => {
+    const t = await unknownCreate();
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
+      itemId: attempt!.itemId,
+      placementId: attempt!.placementId,
+      alreadyExisted: true,
+    }));
+    click('Ponovi isti pokušaj');
+    await screen.findByText(/Spremljeno · potvrđeno online/);
+    expect(screen.queryByText(/NIJE/)).toBeNull();
+  });
+  it('"Odustani od pokušaja": registar se briše, upisi su opet dopušteni, a novi unos dobiva NOVE ID-eve', async () => {
+    const t = await unknownCreate();
+    const oldIds = firstCall(t).attempt!;
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    click('Odustani od pokušaja');
+    expect(screen.queryByTestId('inv-status')).toBeNull();
+    t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
+      itemId: attempt!.itemId,
+      placementId: attempt!.placementId,
+    }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await waitFor(() => expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(1));
+    const fresh = vi.mocked(t.repo.createItemWithPlacement).mock.calls[0]![0].attempt!;
+    expect(fresh.itemId).not.toBe(oldIds.itemId);
+    expect(fresh.placementId).not.toBe(oldIds.placementId);
+  });
+  it('ponovljeni nepoznat ishod zadržava isti zapis (isti ID-evi) i dalje blokira nove upise', async () => {
+    const t = await unknownCreate();
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    click('Ponovi isti pokušaj');
+    await waitFor(() => expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(2));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    const [a, b] = vi.mocked(t.repo.createItemWithPlacement).mock.calls.map((c) => c[0].attempt);
+    expect(a).toEqual(b);
+    expect(addSubmit().disabled).toBe(true);
+  });
+  it('registar nestaje s podatkovnom sesijom (odjava / promjena UID-a / opoziv = unmount): nova sesija nema ni traga', async () => {
+    const t = await unknownCreate();
+    t.unmount();
+    expect(document.body.textContent).not.toContain('Čekić');
+    const t2 = await setup();
+    await t2.push(ready);
+    expect(screen.queryByTestId('inv-status')).toBeNull();
+    tab('Dodaj predmet');
+    expect(field('Naziv predmeta *').value).toBe('');
+  });
+  it('addPlacement: stabilan placementId u pokušaju, provjera po njemu, isto ponavljanje', async () => {
+    const t = await setup();
+    await t.push(ready);
+    t.repo.addPlacement = vi.fn(async () => {
+      throw new DomainError('outcome-unknown');
+    });
+    await openItem('Sol');
+    click(/Dodaj drugi smještaj/);
+    fireEvent.click(screen.getByTestId('dest-garage'));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    const pid = vi.mocked(t.repo.addPlacement).mock.calls[0]![2]!;
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    expect(vi.mocked(t.repo.verify).mock.calls[0]![0]).toEqual({
+      op: 'addPlacement',
+      itemId: 'salt',
+      locationId: 'garage',
+      placementId: pid,
+    });
+    t.repo.addPlacement = vi.fn(async (_i, _l, p) => ({ id: p! }));
+    click('Ponovi isti pokušaj');
+    await waitFor(() => expect(t.repo.addPlacement).toHaveBeenCalledWith('salt', 'garage', pid));
   });
 });

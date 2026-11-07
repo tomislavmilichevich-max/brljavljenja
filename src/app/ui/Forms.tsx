@@ -22,7 +22,10 @@ const splitAliases = (s: string) =>
 export function ItemCreate({ locationId }: { locationId?: string }) {
   const { model, inv, nav, writable, readOnlyReason } = useApp();
   const suggested = locationId && model.locs.has(locationId) ? locationId : '';
-  const [attempt] = useState(newCreateAttempt); // ID-evi pokušaja sačuvani PRIJE slanja (provjera ishoda)
+  // ID-evi pokušaja sačuvani PRIJE slanja (provjera ishoda); nakon izričitog odustajanja (epoch) nastaju novi
+  const [att, setAtt] = useState(() => ({ epoch: inv.epoch, a: newCreateAttempt() }));
+  if (att.epoch !== inv.epoch) setAtt({ epoch: inv.epoch, a: newCreateAttempt() });
+  const attempt = att.a;
   const [name, setName] = useState('');
   const [loc, setLoc] = useState(suggested);
   const [kind, setKind] = useState<ItemKind>('unique');
@@ -59,7 +62,11 @@ export function ItemCreate({ locationId }: { locationId?: string }) {
           aliases: splitAliases(aliases),
           attempt,
         }),
-      { verify: { op: 'createItem', ...attempt }, onApplied: () => finish(attempt.itemId) },
+      {
+        verify: { op: 'createItem', ...attempt, locationId: loc },
+        onApplied: () => finish(attempt.itemId),
+        idempotent: true,
+      },
     );
     if (res.ok) finish(res.value.itemId); // unos se briše TEK nakon potvrđenog uspjeha (odlazak na detalj)
   };
@@ -374,7 +381,10 @@ export function ItemEdit({ id }: { id: string }) {
 export function LocationCreate({ parentId }: { parentId?: string }) {
   const { model, inv, nav, writable, readOnlyReason } = useApp();
   const ctxParent = parentId && model.locs.has(parentId) ? parentId : ROOT_ID;
-  const [newLocId] = useState(newId); // sačuvan ID pokušaja (idempotentni ponovni pokušaj, provjera ishoda)
+  // sačuvan ID pokušaja (idempotentni ponovni pokušaj, provjera ishoda); novi tek nakon izričitog odustajanja
+  const [locAtt, setLocAtt] = useState(() => ({ epoch: inv.epoch, id: newId() }));
+  if (locAtt.epoch !== inv.epoch) setLocAtt({ epoch: inv.epoch, id: newId() });
+  const newLocId = locAtt.id;
   const [name, setName] = useState('');
   const [kind, setKind] = useState<LocationKind | ''>('');
   const [parent, setParent] = useState(ctxParent);
@@ -400,7 +410,11 @@ export function LocationCreate({ parentId }: { parentId?: string }) {
     const res = await inv.run(
       'Dodavanje lokacije',
       (r) => r.createLocation({ name, parentId: effectiveParent, kind, id: newLocId }),
-      { verify: { op: 'createLocation', id: newLocId }, onApplied: () => finish(newLocId) },
+      {
+        verify: { op: 'createLocation', id: newLocId },
+        onApplied: () => finish(newLocId),
+        idempotent: true,
+      },
     );
     if (res.ok) finish(res.value.id);
   };
@@ -617,12 +631,18 @@ export function AddPlacement({ id }: { id: string }) {
   const occupied = new Set(ps.map((p) => p.locationId));
   const pick = async (locationId: string) => {
     if (!writable || occupied.has(locationId)) return;
-    const res = await inv.run('Dodavanje smještaja', (r) => r.addPlacement(id, locationId), {
-      verify: { op: 'addPlacement', itemId: id, locationId },
-      onApplied: () => {
-        if (mounted.current) nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
+    const placementId = newId(); // stabilan ID pokušaja (u zatvorenju: isti pri izričitom ponavljanju)
+    const res = await inv.run(
+      'Dodavanje smještaja',
+      (r) => r.addPlacement(id, locationId, placementId),
+      {
+        idempotent: true,
+        verify: { op: 'addPlacement', itemId: id, locationId, placementId },
+        onApplied: () => {
+          if (mounted.current) nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
+        },
       },
-    });
+    );
     if (res.ok) {
       pushDest(locationId);
       nav.go({ name: 'item', id }, { replace: true, keepStatus: true });

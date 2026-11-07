@@ -217,12 +217,14 @@ function Loaded(props: {
   const [recents, setRecents] = useState<string[]>([]);
   const [recentDest, setRecentDest] = useState<string[]>([]);
 
+  // nerazriješen pokušaj blokira nove upise dok se ne razriješi (provjera / isti pokušaj / izričito odustajanje)
   const unresolved =
-    inv.status.kind === 'unknown' && inv.status.resolution !== 'not-applied' ? true : false;
+    inv.status.kind === 'unknown' &&
+    !(inv.status.resolution === 'not-applied' && !inv.status.retryable);
   let readOnlyReason: string | null = null;
   if (stale) readOnlyReason = 'Veza je prekinuta: moguć je samo pregled. Promjene su onemogućene.';
   else if (!online) readOnlyReason = 'Nema interneta: moguć je samo pregled.';
-  else if (unresolved) readOnlyReason = 'Najprije provjeri stanje prethodne promjene.';
+  else if (unresolved) readOnlyReason = 'Najprije razriješi prethodni pokušaj (Provjeri stanje).';
   const writable = !readOnlyReason && !inv.busy;
 
   const ctx: AppCtx = {
@@ -285,6 +287,8 @@ function Loaded(props: {
             hideSaved={stale}
             onCheck={() => void inv.checkUnknown()}
             onClose={inv.clearStatus}
+            onRetry={() => void inv.retryUnknown()}
+            onAbandon={inv.abandonUnknown}
           />
           {screen}
         </main>
@@ -295,7 +299,7 @@ function Loaded(props: {
                 key={t.id}
                 t={t}
                 active={tab === t.id}
-                disabled={t.id === 'add' && (needsBootstrap || !writable)}
+                disabled={t.id === 'add' && needsBootstrap}
                 nav={nav}
               />
             ))}

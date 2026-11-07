@@ -32,11 +32,15 @@ export function StatusBanner({
   status,
   onCheck,
   onClose,
+  onRetry,
+  onAbandon,
   hideSaved,
 }: {
   status: ActionStatus;
   onCheck: () => void;
   onClose: () => void;
+  onRetry: () => void;
+  onAbandon: () => void;
   hideSaved?: boolean;
 }) {
   switch (status.kind) {
@@ -77,8 +81,11 @@ export function StatusBanner({
           prije provjere.
           {status.resolution === 'not-applied' && (
             <p data-testid="verify-result">
-              Provjera: promjena NIJE pronađena na poslužitelju. Unos je sačuvan i sada ga možeš
-              svjesno ponovno spremiti.
+              Provjera: u trenutku čitanja sa poslužitelja promjena NIJE pronađena. To ne dokazuje
+              da zakašnjeli upis nikad neće stići.
+              {status.retryable
+                ? ' Ponovni pokušaj koristi ISTE ID-eve i ISTE parametre pa ne može stvoriti duplikat.'
+                : ' Unos je sačuvan.'}
             </p>
           )}
           {status.resolution === 'offline' && (
@@ -87,17 +94,30 @@ export function StatusBanner({
             </p>
           )}
           <div className="actions">
-            {status.verify && (
+            {status.verify && status.resolution !== 'not-applied' && (
               <button
                 type="button"
                 className="btn primary"
                 onClick={onCheck}
-                disabled={status.checking || status.resolution === 'not-applied'}
+                disabled={status.checking}
               >
                 {status.checking ? 'Provjeravamo…' : 'Provjeri stanje'}
               </button>
             )}
-            {status.resolution === 'not-applied' && (
+            {status.resolution === 'not-applied' && status.retryable && (
+              <>
+                <button type="button" className="btn primary" onClick={onRetry}>
+                  Ponovi isti pokušaj
+                </button>
+                <button type="button" className="btn secondary" onClick={onAbandon}>
+                  Odustani od pokušaja
+                </button>
+                <button type="button" className="btn secondary" onClick={onCheck}>
+                  Provjeri ponovno
+                </button>
+              </>
+            )}
+            {status.resolution === 'not-applied' && !status.retryable && (
               <button type="button" className="btn secondary" onClick={onClose}>
                 Zatvori poruku
               </button>
