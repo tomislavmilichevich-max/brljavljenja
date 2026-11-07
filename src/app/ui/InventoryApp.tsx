@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { InventoryPort } from '../../inventory/port';
 import { buildSearchIndex } from '../../search/search';
 import { useInventory, type UseInventory } from '../../inventory/useInventory';
@@ -243,6 +243,10 @@ function Loaded(props: {
 
   const route = nav.route;
   const tab = tabOf(route);
+  // pristupačnost: pri promjeni zaslona fokus ide na glavni sadržaj (čitač zaslona najavljuje novi zaslon)
+  useEffect(() => {
+    if (nav.depth > 1) document.getElementById('app')?.focus({ preventScroll: true });
+  }, [route, nav.depth]);
   let screen: ReactNode;
   if (route.name === 'more') screen = <More account={account} ctxStale={stale} online={online} />;
   else if (needsBootstrap) screen = <Bootstrap />;
@@ -257,58 +261,60 @@ function Loaded(props: {
 
   return (
     <AppContext.Provider value={ctx}>
-      <Brand
-        sub={<HeaderLine account={account} phase={props.phaseLine} />}
-        onMore={() => nav.goTab({ name: 'more' })}
-      />
-      <StaleAccount account={account} />
-      <main id="app" className="appview" tabIndex={-1}>
-        {stale && (
-          <div className="inline-status conflict" role="status" data-testid="inv-stale">
-            Veza je prekinuta. Prikazujemo samo posljednje potvrđene podatke iz ove sesije. Promjene
-            nisu dostupne.
-          </div>
-        )}
-        {!stale && !online && (
-          <div className="inline-status conflict" role="status" data-testid="inv-offline">
-            Nema interneta. Moguć je samo pregled; spremanje nije moguće i ne stavlja se u red za
-            kasnije.
-          </div>
-        )}
-        <StatusBanner
-          status={inv.status}
-          hideSaved={stale}
-          onCheck={() => void inv.checkUnknown()}
-          onClose={inv.clearStatus}
+      <div inert={nav.pending ? true : undefined}>
+        <Brand
+          sub={<HeaderLine account={account} phase={props.phaseLine} />}
+          onMore={() => nav.goTab({ name: 'more' })}
         />
-        {screen}
-      </main>
-      <nav className="bottomnav" aria-label="Glavna navigacija" data-testid="bottom-nav">
-        <div className="navinner">
-          {tabs.slice(0, 3).map((t) => (
-            <NavButton
-              key={t.id}
-              t={t}
-              active={tab === t.id}
-              disabled={t.id === 'add' && (needsBootstrap || !writable)}
-              nav={nav}
-            />
-          ))}
-          <button
-            type="button"
-            className="navbtn"
-            disabled
-            aria-label="Popis kupnje, u pripremi"
-            title="U pripremi"
-          >
-            <span className="navicon" aria-hidden="true">
-              🛒
-            </span>
-            <span>Popis · uskoro</span>
-          </button>
-          <NavButton t={tabs[3]!} active={tab === 'more'} disabled={false} nav={nav} />
-        </div>
-      </nav>
+        <StaleAccount account={account} />
+        <main id="app" className="appview" tabIndex={-1}>
+          {stale && (
+            <div className="inline-status conflict" role="status" data-testid="inv-stale">
+              Veza je prekinuta. Prikazujemo samo posljednje potvrđene podatke iz ove sesije.
+              Promjene nisu dostupne.
+            </div>
+          )}
+          {!stale && !online && (
+            <div className="inline-status conflict" role="status" data-testid="inv-offline">
+              Nema interneta. Moguć je samo pregled; spremanje nije moguće i ne stavlja se u red za
+              kasnije.
+            </div>
+          )}
+          <StatusBanner
+            status={inv.status}
+            hideSaved={stale}
+            onCheck={() => void inv.checkUnknown()}
+            onClose={inv.clearStatus}
+          />
+          {screen}
+        </main>
+        <nav className="bottomnav" aria-label="Glavna navigacija" data-testid="bottom-nav">
+          <div className="navinner">
+            {tabs.slice(0, 3).map((t) => (
+              <NavButton
+                key={t.id}
+                t={t}
+                active={tab === t.id}
+                disabled={t.id === 'add' && (needsBootstrap || !writable)}
+                nav={nav}
+              />
+            ))}
+            <button
+              type="button"
+              className="navbtn"
+              disabled
+              aria-label="Popis kupnje, u pripremi"
+              title="U pripremi"
+            >
+              <span className="navicon" aria-hidden="true">
+                🛒
+              </span>
+              <span>Popis · uskoro</span>
+            </button>
+            <NavButton t={tabs[3]!} active={tab === 'more'} disabled={false} nav={nav} />
+          </div>
+        </nav>
+      </div>
       {nav.pending && <UnsavedDialog saving={nav.saving} onChoose={(w) => void nav.choose(w)} />}
     </AppContext.Provider>
   );

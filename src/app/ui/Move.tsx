@@ -3,7 +3,7 @@ import { normalize } from '../../search/normalize';
 import type { Location } from '../../inventory/types';
 import { useApp } from './ctx';
 import { GLYPH, treeOrder } from './model';
-import { Missing, ScreenHead } from './parts';
+import { Missing, ScreenHead, useMounted } from './parts';
 
 interface Dest {
   loc: Location;
@@ -86,6 +86,7 @@ function Destinations({
 export function MoveItem({ id }: { id: string }) {
   const { model, inv, nav, writable, pushDest } = useApp();
   const [source, setSource] = useState<string | null>(null);
+  const mounted = useMounted();
   const item = model.items.get(id);
   if (!item) return <Missing />;
   const ps = model.byItem.get(id) ?? [];
@@ -135,7 +136,7 @@ export function MoveItem({ id }: { id: string }) {
     if (!writable) return;
     const finish = () => {
       pushDest(dest);
-      nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
+      if (mounted.current) nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
     };
     const res = await inv.run(
       'Premještanje smještaja',
@@ -176,6 +177,7 @@ export function MoveItem({ id }: { id: string }) {
 
 export function MoveLocation({ id }: { id: string }) {
   const { model, inv, nav, writable, pushDest } = useApp();
+  const mounted = useMounted();
   const loc = model.locs.get(id);
   if (!loc) return <Missing />;
   if (loc.kind === 'room' || loc.kind === 'house')
@@ -200,7 +202,7 @@ export function MoveLocation({ id }: { id: string }) {
     if (!writable) return;
     const finish = () => {
       pushDest(dest);
-      nav.go({ name: 'location', id }, { replace: true, keepStatus: true });
+      if (mounted.current) nav.go({ name: 'location', id }, { replace: true, keepStatus: true });
     };
     const res = await inv.run(
       'Premještanje lokacije',

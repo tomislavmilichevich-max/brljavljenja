@@ -40,4 +40,19 @@ describe('politika izvornog koda (bez skrivenog reda, bez trajnog keša)', () =>
     expect(code).toMatch(/runTransaction/);
     expect((code.match(/tx\.(set|update|delete)\(/g) ?? []).length).toBeGreaterThan(5);
   });
+  it('P2-C: produkcijski izvorni kod ne uvozi demo fixture niti sadrži demo kontrole/simulirane upise prototipa', () => {
+    for (const f of files) {
+      const code = strip(readFileSync(f, 'utf8'));
+      expect(code, f).not.toMatch(/docs\/fixtures|P2_DEMO_HOUSE|fixtures\//);
+      expect(code, f).not.toMatch(
+        /simulatedWrite|__demoSeq|set-outcome|verifyResolution|setTimeout\(.*serverOutcome/,
+      );
+    }
+  });
+  it('P2-C: nijedan upis u Firestore izvan repozitorija (UI zove samo InventoryRepository)', () => {
+    for (const f of files.filter((x) => x.includes('/app/') || x.includes('/search/'))) {
+      const code = strip(readFileSync(f, 'utf8'));
+      expect(code, f).not.toMatch(/from 'firebase\/firestore'/);
+    }
+  });
 });

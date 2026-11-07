@@ -726,3 +726,53 @@ describe('navigacija i Android Back', () => {
     expect(account.onRecheck).toHaveBeenCalled();
   });
 });
+
+describe('nepoznat ishod pri uređivanju i odlasku s obrasca', () => {
+  it('uređivanje: nepoznat ishod pa provjera "applied" vodi na detalj kao spremljeno (bez lažnog konflikta)', async () => {
+    const t = await setup();
+    await t.push(ready);
+    t.repo.updateItem = vi.fn(async () => {
+      throw new DomainError('outcome-unknown');
+    });
+    await openItem('Sol');
+    click('Uredi');
+    fireEvent.change(field('Naziv predmeta *'), { target: { value: 'Morska sol' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Uredi predmet' }));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    expect(field('Naziv predmeta *').value).toBe('Morska sol'); // unos sačuvan
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('item-name');
+    expect(screen.getByText(/Spremljeno · potvrđeno online/)).toBeTruthy();
+  });
+  it('provjera dovršena nakon što je korisnik napustio obrazac NE preusmjerava ga na drugi zaslon', async () => {
+    const t = await setup();
+    await t.push(ready);
+    t.repo.createItemWithPlacement = vi.fn(async () => {
+      throw new DomainError('outcome-unknown');
+    });
+    tab('Dodaj predmet');
+    fireEvent.change(field('Lokacija *'), { target: { value: 'garage' } });
+    fireEvent.change(field('Naziv predmeta *'), { target: { value: 'Čekić' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    tab('Lokacije'); // korisnik odlazi; nerazriješeno upozorenje ostaje
+    expect(screen.getByRole('heading', { name: 'Lokacije' })).toBeTruthy();
+    expect(screen.getByTestId('inv-status').textContent).toContain('Veza je prekinuta');
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'applied');
+    click('Provjeri stanje');
+    await screen.findByText(/Spremljeno · potvrđeno online/);
+    expect(screen.getByRole('heading', { name: 'Lokacije' })).toBeTruthy(); // ostaje gdje jest
+  });
+  it('dok je dijalog nespremljenih izmjena otvoren, pozadina je neaktivna (inert)', async () => {
+    const t = await setup();
+    await t.push(ready);
+    await openItem('Sol');
+    click('Uredi');
+    fireEvent.change(field('Naziv predmeta *'), { target: { value: 'X' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Natrag' }));
+    expect(screen.getByTestId('bottom-nav').closest('[inert]')).not.toBeNull();
+    click('Ostani ovdje');
+    expect(screen.getByTestId('bottom-nav').closest('[inert]')).toBeNull();
+  });
+});

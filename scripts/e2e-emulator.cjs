@@ -10,6 +10,22 @@ const FS = `http://127.0.0.1:8080/v1/projects/${PROJECT}/databases/(default)/doc
 const BASE = 'http://127.0.0.1:5173';
 const H = 'h1';
 const results = [];
+/** P2-C: račun (Odjava, Provjeri pristup) je u kartici "Više" (ili u kartici računa dok inventar još nije potvrđen). */
+async function accountButton(page, name) {
+  const any = page.getByRole('button', { name, exact: true });
+  // sačekaj stabilno stanje (ne "Učitavanje inventara": tada se kartica računa još zamjenjuje)
+  await page
+    .locator(
+      '[data-testid=tab-more], [data-testid=inv-error], [data-testid=inv-corrupt], [data-testid=inv-inconsistent], [data-testid=inv-open-error], [data-testid=own-uid], h1:has-text("Provjera pristupa nije uspjela")',
+    )
+    .first()
+    .waitFor({ timeout: 30000 });
+  if (await any.count()) return any.first();
+  await page.getByTestId('tab-more').click();
+  await page.getByTestId('account-card').waitFor({ timeout: 10000 });
+  return any.first();
+}
+
 const check = (name, ok, extra = '') => {
   results.push({ name, ok });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? '  ' + extra : ''}`);
@@ -83,6 +99,7 @@ async function signInAs(page, _ctx, name) {
     }
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
+    globalThis.__page = page; // za dijagnostiku pri padu
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
     await page.goto(BASE);
@@ -123,7 +140,7 @@ async function signInAs(page, _ctx, name) {
     check('E2E-5 reload: sesija ostaje, pristup ponovno potvrđen sa servera', true);
 
     // 4) Odjava
-    await page.getByRole('button', { name: 'Odjava' }).click();
+    await (await accountButton(page, 'Odjava')).click();
     await page.getByRole('button', { name: 'Prijava Google računom' }).waitFor();
     check(
       'E2E-6 odjava: ekran prijave, naziv kućanstva nije u DOM-u',
@@ -138,7 +155,7 @@ async function signInAs(page, _ctx, name) {
       'E2E-7 drugi račun na istom uređaju: nema pristupa, drugi UID',
       uidD !== uidC && !(await page.locator('body').innerText()).includes('Testno kućanstvo'),
     );
-    await page.getByRole('button', { name: 'Odjava' }).click();
+    await (await accountButton(page, 'Odjava')).click();
     await page.getByRole('button', { name: 'Prijava Google računom' }).waitFor();
 
     // 6) Opoziv: C je i dalje prijavljen u emulatoru, ali enabled:false -> odbijen
@@ -210,7 +227,7 @@ async function signInAs(page, _ctx, name) {
     await page.getByRole('button', { name: 'Provjeri ponovno' }).click();
     await page.getByTestId('household-name').waitFor({ timeout: 20000 });
     await adminDelete(`households/${H}`); // members/{uid} ostaje (subkolekcija bez roditelja)
-    await page.getByRole('button', { name: 'Provjeri pristup' }).click();
+    await (await accountButton(page, 'Provjeri pristup')).click();
     await page
       .getByRole('heading', { name: 'Provjera pristupa nije uspjela' })
       .waitFor({ timeout: 20000 });
@@ -222,7 +239,23 @@ async function signInAs(page, _ctx, name) {
 
     check('E2E-14 nema neuhvaćenih JS grešaka', errors.length === 0, errors.join(' | '));
   } catch (e) {
-    check('E2E izvršavanje', false, String(e).split('\n')[0]);
+    check('E2E izvršavanje', false, String(e).split('\n').slice(0, 12).join(' / '));
+    if (globalThis.__page && process.env.E2E_SHOT) {
+      await globalThis.__page
+        .screenshot({ path: process.env.E2E_SHOT, fullPage: true })
+        .catch(() => {});
+      console.log(
+        'BODY:',
+        (
+          await globalThis.__page
+            .locator('body')
+            .innerText()
+            .catch(() => '')
+        )
+          .replace(/\s+/g, ' ')
+          .slice(0, 600),
+      );
+    }
   } finally {
     await browser.close();
     try {

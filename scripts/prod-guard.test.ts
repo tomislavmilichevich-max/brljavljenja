@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error — čisti ESM modul bez deklaracija tipova
-import { EXPECTED, checkDist, checkEnv, checkRules, manifestOf } from './prod-guard.mjs';
+import {
+  DEMO_MARKERS,
+  EXPECTED,
+  checkDist,
+  checkEnv,
+  checkRules,
+  manifestOf,
+} from './prod-guard.mjs';
 
 const goodEnv = {
   VITE_FIREBASE_API_KEY: 'AIza' + 'A'.repeat(35),
@@ -69,6 +76,13 @@ describe('checkDist', () => {
       const d = goodDist();
       d[3] = f('assets/index-abc.js', `projectId:"${EXPECTED.projectId}" ${bad}`);
       expect(checkDist(d).join()).toContain('zabranjeni trag');
+    }
+  });
+  it('P2-C: demo podaci i demo kontrole prototipa u bundleu se odbijaju', () => {
+    for (const bad of DEMO_MARKERS) {
+      const d = goodDist();
+      d[3] = f('assets/index-abc.js', `projectId:"${EXPECTED.projectId}" x${bad}x`);
+      expect(checkDist(d).join(), bad).toContain('demo podatak');
     }
   });
   it('nedopuštene datoteke (.env, source map, nepoznata JSON) se odbijaju', () => {

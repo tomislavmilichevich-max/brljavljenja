@@ -10,7 +10,7 @@ import {
 } from '../../inventory/types';
 import { useApp } from './ctx';
 import { GLYPH, kindText, KIND_LABEL, treeOrder } from './model';
-import { Field, Missing, ScreenHead } from './parts';
+import { Field, Missing, ScreenHead, useMounted } from './parts';
 
 const splitAliases = (s: string) =>
   s
@@ -33,10 +33,10 @@ export function ItemCreate({ locationId }: { locationId?: string }) {
   const nameRef = useRef<HTMLInputElement>(null);
   const locRef = useRef<HTMLSelectElement>(null);
 
-  const finish = useCallback(
-    (itemId: string) => nav.go({ name: 'item', id: itemId }, { replace: true, keepStatus: true }),
-    [nav],
-  );
+  const mounted = useMounted();
+  const finish = (itemId: string) => {
+    if (mounted.current) nav.go({ name: 'item', id: itemId }, { replace: true, keepStatus: true });
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -212,6 +212,8 @@ export function ItemEdit({ id }: { id: string }) {
   const [draft, setDraft] = useState(() => init(live));
   const [nameErr, setNameErr] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+  const mounted = useMounted();
+  const doneRef = useRef(false); // nakon potvrđenog spremanja zaštita se ne smije ponovno uključiti
   const baseVals = useMemo(() => init(base), [base]);
   const dirty =
     draft.name.trim() !== baseVals.name.trim() ||
@@ -233,14 +235,21 @@ export function ItemEdit({ id }: { id: string }) {
       note: draft.note.trim() || null,
       aliases: splitAliases(draft.aliases),
     };
+    const leave = () => {
+      doneRef.current = true;
+      nav.setGuard(null);
+      if (mounted.current) nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
+    };
     const res = await inv.run('Spremanje predmeta', (r) => r.updateItem(id, patch, base.version), {
       verify: { op: 'updateItem', id, expectedVersion: base.version, patch },
+      onApplied: leave, // provjera je dokazala da je NAŠA promjena na poslužitelju: nema lažnog "konflikta"
     });
+    if (res.ok) doneRef.current = true;
     return res.ok;
-  }, [base, draft, id, inv, writable]);
+  }, [base, draft, id, inv, writable, nav, mounted]);
 
   useEffect(() => {
-    nav.setGuard(dirty ? { dirty: true, save } : null);
+    nav.setGuard(dirty && !doneRef.current ? { dirty: true, save } : null);
     return () => nav.setGuard(null);
   }, [dirty, save, nav]);
 
@@ -375,10 +384,10 @@ export function LocationCreate({ parentId }: { parentId?: string }) {
   const roomAllowed = ctxParent === ROOT_ID;
   const effectiveParent = kind === 'room' ? ROOT_ID : parent;
 
-  const finish = useCallback(
-    (id: string) => nav.go({ name: 'location', id }, { replace: true, keepStatus: true }),
-    [nav],
-  );
+  const mounted = useMounted();
+  const finish = (id: string) => {
+    if (mounted.current) nav.go({ name: 'location', id }, { replace: true, keepStatus: true });
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!writable) return;
@@ -482,6 +491,8 @@ export function LocationEdit({ id }: { id: string }) {
   const [name, setName] = useState(live?.name ?? '');
   const [err, setErr] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+  const mounted = useMounted();
+  const doneRef = useRef(false);
   const dirty = (base?.name ?? '').trim() !== name.trim();
 
   const save = useCallback(async (): Promise<boolean> => {
@@ -492,16 +503,25 @@ export function LocationEdit({ id }: { id: string }) {
       return false;
     }
     setErr(null);
+    const leave = () => {
+      doneRef.current = true;
+      nav.setGuard(null);
+      if (mounted.current) nav.go({ name: 'location', id }, { replace: true, keepStatus: true });
+    };
     const res = await inv.run(
       'Spremanje naziva lokacije',
       (r) => r.renameLocation(id, name, base.version),
-      { verify: { op: 'renameLocation', id, expectedVersion: base.version, name } },
+      {
+        verify: { op: 'renameLocation', id, expectedVersion: base.version, name },
+        onApplied: leave,
+      },
     );
+    if (res.ok) doneRef.current = true;
     return res.ok;
-  }, [base, id, inv, name, writable]);
+  }, [base, id, inv, name, writable, nav, mounted]);
 
   useEffect(() => {
-    nav.setGuard(dirty ? { dirty: true, save } : null);
+    nav.setGuard(dirty && !doneRef.current ? { dirty: true, save } : null);
     return () => nav.setGuard(null);
   }, [dirty, save, nav]);
 
@@ -581,6 +601,7 @@ export function LocationEdit({ id }: { id: string }) {
 // ------------------------------------------------------------------ drugi smještaj
 export function AddPlacement({ id }: { id: string }) {
   const { model, inv, nav, writable, pushDest } = useApp();
+  const mounted = useMounted();
   const item = model.items.get(id);
   if (!item) return <Missing />;
   const ps = model.byItem.get(id) ?? [];
@@ -598,7 +619,9 @@ export function AddPlacement({ id }: { id: string }) {
     if (!writable || occupied.has(locationId)) return;
     const res = await inv.run('Dodavanje smještaja', (r) => r.addPlacement(id, locationId), {
       verify: { op: 'addPlacement', itemId: id, locationId },
-      onApplied: () => nav.go({ name: 'item', id }, { replace: true, keepStatus: true }),
+      onApplied: () => {
+        if (mounted.current) nav.go({ name: 'item', id }, { replace: true, keepStatus: true });
+      },
     });
     if (res.ok) {
       pushDest(locationId);

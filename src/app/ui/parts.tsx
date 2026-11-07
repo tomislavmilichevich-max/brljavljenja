@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
 import type { ActionStatus } from '../../inventory/useInventory';
 import { GLYPH } from './model';
 import type { Location } from '../../inventory/types';
@@ -197,4 +197,16 @@ export function Field({
 
 export function LocGlyph({ loc }: { loc: Location }) {
   return <span aria-hidden="true">{GLYPH[loc.kind] ?? '📦'}</span>;
+}
+
+/** true dok je zaslon (obrazac) još prikazan — odgođena potvrda ishoda smije navigirati samo ako korisnik nije otišao. */
+export function useMounted(): MutableRefObject<boolean> {
+  const ref = useRef(true);
+  useEffect(() => {
+    ref.current = true;
+    return () => {
+      ref.current = false;
+    };
+  }, []);
+  return ref;
 }
