@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { ActionStatus } from '../../inventory/useInventory';
 import { GLYPH } from './model';
 import type { Location } from '../../inventory/types';
@@ -105,17 +105,7 @@ export function StatusBanner({
               </button>
             )}
             {status.resolution === 'not-applied' && status.retryable && (
-              <>
-                <button type="button" className="btn primary" onClick={onRetry}>
-                  Ponovi isti pokušaj
-                </button>
-                <button type="button" className="btn secondary" onClick={onAbandon}>
-                  Odustani od pokušaja
-                </button>
-                <button type="button" className="btn secondary" onClick={onCheck}>
-                  Provjeri ponovno
-                </button>
-              </>
+              <RetryActions onRetry={onRetry} onAbandon={onAbandon} onCheck={onCheck} />
             )}
             {status.resolution === 'not-applied' && !status.retryable && (
               <button type="button" className="btn secondary" onClick={onClose}>
@@ -126,6 +116,70 @@ export function StatusBanner({
         </div>
       );
   }
+}
+
+/**
+ * "Odustani od pokušaja" traži potvrdu s jasnim upozorenjem (P2-D1): odustajanje NE poništava upis koji je možda već
+ * stigao ili još može stići na poslužitelj; ponovni unos tada može stvoriti duplikat.
+ */
+function RetryActions({
+  onRetry,
+  onAbandon,
+  onCheck,
+}: {
+  onRetry: () => void;
+  onAbandon: () => void;
+  onCheck: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const safe = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming) safe.current?.focus(); // fokus na SIGURNU radnju ("Vrati se"), nikad na destruktivnu
+  }, [confirming]);
+  if (confirming)
+    return (
+      <div
+        role="group"
+        aria-label="Potvrda odustajanja"
+        data-testid="abandon-confirm"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setConfirming(false); // zatvaranje = NE odustaje
+        }}
+      >
+        <p>
+          <strong>Odustati od ovog pokušaja?</strong> Prethodna promjena možda ipak stigne na
+          poslužitelj: provjera nije dokazala da nikad neće stići. Ako odustaneš pa isti unos upišeš
+          ponovno, može nastati <strong>duplikat</strong>. Prije ponovnog unosa provjeri pretragu.
+          Odustajanje je tvoja svjesna odluka i ne može se poništiti.
+        </p>
+        <div className="actions">
+          <button
+            ref={safe}
+            type="button"
+            className="btn primary"
+            onClick={() => setConfirming(false)}
+          >
+            Vrati se
+          </button>
+          <button type="button" className="btn coralbtn" onClick={onAbandon}>
+            Odustani ipak
+          </button>
+        </div>
+      </div>
+    );
+  return (
+    <>
+      <button type="button" className="btn primary" onClick={onRetry}>
+        Ponovi isti pokušaj
+      </button>
+      <button type="button" className="btn secondary" onClick={() => setConfirming(true)}>
+        Odustani od pokušaja
+      </button>
+      <button type="button" className="btn secondary" onClick={onCheck}>
+        Provjeri ponovno
+      </button>
+    </>
+  );
 }
 
 /** Dijalog UX-032-01. Escape/Natrag = "Ostani ovdje". Fokus ulazi u dijalog i vraća se na prethodni element. */

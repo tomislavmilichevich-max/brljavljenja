@@ -14,7 +14,7 @@
   --coralSoft: #fff0e9;
   --brown: #756353;
   --ink: #243225;
-  --muted: #687469;
+  --muted: #566257;
   --line: #e9e5dc;
   --shadow: 0 8px 24px rgba(92, 72, 46, 0.085);
   --shadow-sm: 0 3px 10px rgba(92, 72, 46, 0.07);
@@ -50,7 +50,7 @@ button:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid #78afc6;
+  outline: 3px solid #1f6f94;
   outline-offset: 2px;
 }
 .shell {
@@ -109,7 +109,7 @@ textarea:focus-visible {
 }
 .small-status {
   font-size: 11px;
-  color: #847761;
+  color: #6b5f4b;
   margin-top: 2px;
 }
 .appview {
@@ -142,7 +142,7 @@ textarea:focus-visible {
 }
 .eyebrow {
   font-size: 11px;
-  color: #75845d;
+  color: #5a6a42;
   font-weight: 700;
   letter-spacing: 0.9px;
   text-transform: uppercase;
@@ -182,7 +182,7 @@ h3 {
 .searchbar {
   background: #fff;
   box-shadow: var(--shadow-sm);
-  border: 1px solid #eee6d8;
+  border: 1px solid #7f877b; /* granica polja za pretragu ≥ 3:1 */
   border-radius: 17px;
   height: 56px;
   display: flex;
@@ -203,7 +203,7 @@ h3 {
   outline: none;
 }
 .searchbar:focus-within {
-  outline: 2px solid #add0ad;
+  outline: 3px solid #1f6f94;
 }
 .ic {
   width: 20px;
@@ -362,7 +362,7 @@ h3 {
 }
 .crumb {
   font-size: 12px;
-  color: #7d826f;
+  color: #5f6552;
   margin: 0 0 10px;
   line-height: 1.5;
 }
@@ -417,7 +417,7 @@ h3 {
   filter: drop-shadow(0 8px 4px #eee0c8);
 }
 .locationhero small {
-  color: #718068;
+  color: #4f5d49;
   font-weight: 700;
   font-size: 11px;
   letter-spacing: 1px;
@@ -603,7 +603,7 @@ h3 {
 .field input,
 .field select,
 .field textarea {
-  border: 1px solid #dfdfd4;
+  border: 1px solid #7f877b; /* WCAG 1.4.11: granica polja ≥ 3:1 */
   border-radius: 13px;
   padding: 12px 13px;
   outline: none;
@@ -781,7 +781,7 @@ h3 {
 .navinner {
   max-width: 850px;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin: auto;
   gap: 2px;
 }
@@ -1042,7 +1042,7 @@ h3 {
   padding: 1px 2px 6px;
 }
 .dest-filter {
-  border: 1px solid #dfdfd4;
+  border: 1px solid #7f877b; /* WCAG 1.4.11: granica polja ≥ 3:1 */
   border-radius: 15px;
   padding: 13px 14px;
   width: 100%;
@@ -1659,7 +1659,7 @@ body {
 .listrow:focus-visible,
 .roomcard:focus-visible,
 .quick-destination:focus-visible {
-  outline: 3px solid #78afc6;
+  outline: 3px solid #1f6f94;
   outline-offset: 2px;
 }
 .sticky-total {
@@ -1691,4 +1691,80 @@ body {
 }
 .authscreen .field input {
   width: 100%;
+}
+
+/* P2-D1: reflow pri 200 % zoomu / povećanom fontu (WCAG 1.4.4, 1.4.10): zaglavlje i navigacija se prelamaju, ne prelijevaju */
+.top {
+  min-width: 0;
+}
+.brand {
+  white-space: normal;
+  min-width: 0;
+}
+.brand > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.avatar-button {
+  flex-shrink: 0;
+}
+.navbtn {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  hyphens: auto;
+}
+.navbtn span:last-child {
+  max-width: 100%;
+  text-align: center;
+}
+.bottomnav {
+  overflow-x: hidden;
+}
+.field input,
+.field select,
+.field textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+.card,
+.field {
+  min-width: 0;
+}
+@media (max-width: 200px) {
+  .hero-art {
+    display: none;
+  }
+  .thumb,
+  .thumb.small {
+    display: none;
+  }
+  .app-wrap {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+  .rooms-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .quickgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.hero-art {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+}
+.hero-line > div:first-child {
+  min-width: 0;
+}
+.roomcard,
+.listrow,
+.quick {
+  min-width: 0;
+}
+.rowtxt strong,
+.rowtxt small,
+.quick strong {
+  overflow-wrap: anywhere;
 }

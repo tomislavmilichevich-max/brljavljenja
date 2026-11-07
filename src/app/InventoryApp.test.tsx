@@ -889,6 +889,16 @@ describe('P2C-REV-01: session-scoped registar nerazriješenih pokušaja', () => 
     click('Provjeri stanje');
     await screen.findByTestId('verify-result');
     click('Odustani od pokušaja');
+    // potvrda s jasnim upozorenjem: zakašnjeli original može stići, ponovni unos može dati duplikat
+    const warn = screen.getByTestId('abandon-confirm').textContent ?? '';
+    expect(warn).toContain('možda ipak stigne na poslužitelj');
+    expect(warn).toContain('svjesna odluka');
+    expect(warn).toContain('duplikat');
+    click('Vrati se');
+    expect(screen.queryByTestId('abandon-confirm')).toBeNull();
+    expect(screen.getByTestId('inv-status')).toBeTruthy(); // ništa nije odbačeno
+    click('Odustani od pokušaja');
+    click('Odustani ipak');
     expect(screen.queryByTestId('inv-status')).toBeNull();
     t.repo.createItemWithPlacement = vi.fn(async ({ attempt }) => ({
       itemId: attempt!.itemId,
@@ -945,5 +955,70 @@ describe('P2C-REV-01: session-scoped registar nerazriješenih pokušaja', () => 
     t.repo.addPlacement = vi.fn(async (_i, _l, p) => ({ id: p! }));
     click('Ponovi isti pokušaj');
     await waitFor(() => expect(t.repo.addPlacement).toHaveBeenCalledWith('salt', 'garage', pid));
+  });
+});
+
+describe('P2-D1: "Odustani od pokušaja" se ne može potvrditi slučajno', () => {
+  async function notApplied() {
+    const t = await setup();
+    await t.push(ready);
+    t.repo.createItemWithPlacement = vi.fn(async () => {
+      throw new DomainError('outcome-unknown');
+    });
+    tab('Dodaj predmet');
+    fireEvent.change(field('Lokacija *'), { target: { value: 'garage' } });
+    fireEvent.change(field('Naziv predmeta *'), { target: { value: 'Čekić' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await screen.findByText(/Veza je prekinuta tijekom potvrđivanja/);
+    t.repo.verify = vi.fn(async (): Promise<VerifyResult> => 'not-applied');
+    click('Provjeri stanje');
+    await screen.findByTestId('verify-result');
+    return t;
+  }
+
+  it('jedan (i dvostruki) dodir na "Odustani od pokušaja" samo otvara potvrdu; pokušaj ostaje', async () => {
+    await notApplied();
+    click('Odustani od pokušaja');
+    expect(screen.getByTestId('abandon-confirm')).toBeTruthy();
+    expect(screen.getByTestId('inv-status')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Odustani od pokušaja' })).toBeNull(); // drugi dodir ne pogađa isti gumb
+    expect(screen.getByRole('button', { name: 'Odustani ipak' })).toBeTruthy();
+  });
+  it('fokus je na sigurnoj radnji "Vrati se", ne na "Odustani ipak"', async () => {
+    await notApplied();
+    click('Odustani od pokušaja');
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Vrati se' }));
+  });
+  it('Escape zatvara potvrdu bez odustajanja', async () => {
+    await notApplied();
+    click('Odustani od pokušaja');
+    fireEvent.keyDown(screen.getByTestId('abandon-confirm'), { key: 'Escape' });
+    expect(screen.queryByTestId('abandon-confirm')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Ponovi isti pokušaj' })).toBeTruthy();
+    expect(screen.getByTestId('inv-status').textContent).toContain('NIJE pronađena');
+  });
+  it('Android Back (popstate) dok je potvrda otvorena NE odustaje: pokušaj ostaje u registru', async () => {
+    const t = await notApplied();
+    click('Odustani od pokušaja');
+    await act(async () => void window.dispatchEvent(new PopStateEvent('popstate')));
+    expect(screen.getByTestId('inv-status')).toBeTruthy(); // pokušaj je i dalje u registru
+    expect(vi.mocked(t.repo.createItemWithPlacement)).toHaveBeenCalledTimes(1);
+    click('Vrati se');
+    expect(screen.getByRole('button', { name: 'Ponovi isti pokušaj' })).toBeTruthy();
+    expect(screen.getByTestId('inv-status').textContent).toContain('NIJE pronađena');
+  });
+  it('navigacija na drugu karticu ne odustaje; "Vrati se" vraća na izbor; tek "Odustani ipak" briše', async () => {
+    await notApplied();
+    click('Odustani od pokušaja');
+    tab('Lokacije');
+    expect(screen.getByTestId('inv-status')).toBeTruthy();
+    click('Vrati se');
+    expect(screen.getByRole('button', { name: 'Ponovi isti pokušaj' })).toBeTruthy();
+  });
+  it('tek "Odustani ipak" briše pokušaj', async () => {
+    await notApplied();
+    click('Odustani od pokušaja');
+    click('Odustani ipak');
+    expect(screen.queryByTestId('inv-status')).toBeNull();
   });
 });
