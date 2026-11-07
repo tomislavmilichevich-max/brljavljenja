@@ -2,6 +2,8 @@
 
 **Status: PRIPREMLJENO, NIJE IZVRŠENO.** Ništa iz ovog dokumenta nije pokrenuto. Svaki korak 4, 6 i 7 izvodi se **tek nakon zasebnog izričitog odobrenja** vlasnika u chatu. Projekt: `home-inventory-pwa-218be` (Spark), kućanstvo `kuca1`. Budžet 0 €: ne klikati _Upgrade_/Blaze, ne dodavati karticu, ne uključivati Cloud Functions/Storage/App Hosting.
 
+**Fail-closed:** svaka naredba koja mijenja produkciju (`deploy:rules`, `deploy:hosting`, `firebase deploy` za povrat pravila) pokreće se **isključivo iz skripti** u §2a. Skripta radi u vlastitom `bash` procesu sa `set -euo pipefail`, pa greška **ne zatvara** tvoj Cloud Shell; svaki obavezni uvjet je `die` (izlaz 1) **prije** naredbe za deploy. Nikad se ne koristi `|| echo "STANI"` nakon kojeg bi se nastavilo. Deploy naredba se nalazi tek na kraju skripte i pokreće se samo ako je prošao SVAKI uvjet i ako je zadana izričita potvrda (`CONFIRM=…`, daje se tek nakon vlasnikova odobrenja).
+
 Svaka naredba ima fiksni projekt i `--only`; nema generičkog `firebase deploy`. Sve se izvodi u Cloud Shellu (<https://shell.cloud.google.com>) računom vlasnika projekta. Vrijednosti u `<…>` zamijeniti; **nikad** ne lijepiti ključeve ni UID-ove u chat.
 
 ## 0. Preduvjeti (prije PRVE objave; sve mora biti ispunjeno)
@@ -21,6 +23,13 @@ Svaka naredba ima fiksni projekt i `--only`; nema generičkog `firebase deploy`.
 
 **0.3 Razumijevanje rizika:** Hosting/Rules rollback **ne vraća podatke u Firestoreu** (vidi §9). Sadržaj koji se unosi tijekom pilota mora biti zamjenjiv.
 
+**0.4 Obavezni uvjeti naspram informativnih provjera**
+
+| Vrsta                                            | Što                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Posljedica neuspjeha                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **OBAVEZNO (skripta provodi, deploy zabranjen)** | izričita potvrda `CONFIRM`; postojanje klona `~/home-inventory-pwa` i da je to korijen repozitorija; `HEAD` = zabilježeni commit (40-znamenkasti hash); `git status --porcelain` prazan (i nepraćene datoteke); `sha256` `firestore.rules` = `157feee0f7ca`; `guard:rules`; valjana sigurnosna kopija pravila (`sha256sum -c`, ≥ 100 B, sadrži `rules_version` i `service cloud.firestore`); zabilježeno Hosting izdanje; za Hosting još: `.env.production.local` + `guard:env` + **aktivna pravila na poslužitelju jednaka `firestore.rules`** (REST mora uspjeti) | skripta ispiše `ZAUSTAVLJENO: …` i **izađe s kodom 1 bez poziva deploya** |
+| **INFORMATIVNO (samo ispis, ne zaustavlja)**     | ispisi u koracima 1 i 2 (`git log`, `node -v`, `projects:list`, `apps:list`), `ls -l ~/backup`, `head` kopije pravila, ručni pregledi u Console                                                                                                                                                                                                                                                                                                                                                                                                                     | čovjek ih pročita; ne zamjenjuju obavezne uvjete                          |
+
 ## 1. Provjera aktualne grane i konfiguracije
 
 ```bash
@@ -38,7 +47,7 @@ sha256sum firestore.rules | cut -c1-12   # mora ispisati 157feee0f7ca
 npm run build:prod                   # guard:env → build → guard:dist; ZAUSTAVLJENO = prekini i javi ispis
 ```
 
-**Očekivano:** svi koraci OK; `guard:dist` ispisuje točan popis 9 datoteka (bez `.map`, bez `.env`, bez demo podataka). Ako ijedan korak javi problem — **STANI**.
+**Ovaj korak je informativan** (pregled i zapis commita); iste obavezne uvjete ponovno provode skripte u koracima 4 i 6. **Očekivano:** svi koraci OK; `guard:dist` ispisuje točan popis 9 datoteka (bez `.map`, bez `.env`, bez demo podataka). Ako ijedan korak javi problem — **STANI**.
 
 ## 2. Pregled ciljanog Firebase projekta
 
@@ -51,81 +60,212 @@ npx firebase firestore:databases:list --project home-inventory-pwa-218be
 
 Ručno u Console (CLI to ne pokazuje): plan je **Spark** (lijevo dolje); _Authentication → Settings → Authorized domains_ sadrži `home-inventory-pwa-218be.firebaseapp.com` i `.web.app`; Firestore je u _Production mode_. **Očekivano:** točno taj projekt, Spark. Bilo što drugo — STANI.
 
-## 3. Sigurnosna kopija aktualnih pravila i Hosting izdanja (prije ikakve objave)
+## 2a. Instalacija pomoćnih skripti (jednom, bez ikakvog učinka na produkciju)
 
-Skripta **staje** (izlazni kod ≠ 0) ako REST odgovor sadrži grešku, ako nema aktivnog rulesetta (`null`), ako je sadržaj prazan ili ne izgleda kao Firestore pravila, ili ako sigurnosna kopija već postoji (ne prepisuje se). Pokreće se kao zasebna skripta (`bash`), pa `exit` ne zatvara Cloud Shell.
+Skripte samo stvaraju datoteke u `~/backup`; ništa se ne izvršava i ništa se ne objavljuje.
 
 ```bash
-mkdir -p ~/backup && cat > ~/backup/backup-rules.sh <<'EOF'
-#!/bin/bash
-set -u
+mkdir -p ~/backup
+cat > ~/backup/lib.sh <<'EOF'
+# Zajednička biblioteka (uključuje se s `source`; sama ništa ne objavljuje). Svaka skripta radi u VLASTITOM bash procesu.
+set -euo pipefail
 P=home-inventory-pwa-218be
-OUT="$HOME/backup"
+REPO="$HOME/home-inventory-pwa"
+BK="$HOME/backup"
+EXPECTED_RULES_SHA12=157feee0f7ca
+die() { echo "ZAUSTAVLJENO: $*" >&2; exit 1; }
+need_confirm() { [ "${CONFIRM:-}" = "$1" ] || die "nema izričite potvrde (pokreni s CONFIRM=$1 TEK nakon vlasnikova odobrenja)"; }
+
+# OBAVEZNI UVJETI repozitorija: svaki neuspjeh = izlaz 1 (deploy se ne pokreće)
+preflight_repo() {
+  [ -d "$REPO/.git" ] || die "ne postoji klon $REPO"
+  cd "$REPO" || die "cd $REPO nije uspio"
+  [ "$(git rev-parse --show-toplevel)" = "$(pwd -P)" ] || die "trenutni direktorij nije korijen repozitorija $REPO"
+  local want have
+  want=$(cat "$BK/deploy-commit.txt" 2>/dev/null) || die "nema $BK/deploy-commit.txt (korak 1)"
+  [[ "$want" =~ ^[0-9a-f]{40}$ ]] || die "deploy-commit.txt ne sadrži valjan 40-znamenkasti hash"
+  have=$(git rev-parse HEAD)
+  [ "$have" = "$want" ] || die "HEAD ($have) se razlikuje od zabilježenog commita ($want)"
+  [ -z "$(git status --porcelain --untracked-files=all)" ] || die "git status nije čist (nepraćene ili izmijenjene datoteke)"
+  [ -f firestore.rules ] || die "nema firestore.rules"
+  [ "$(sha256sum firestore.rules | cut -c1-12)" = "$EXPECTED_RULES_SHA12" ] || die "hash firestore.rules nije $EXPECTED_RULES_SHA12"
+  npm run guard:rules >/dev/null || die "guard:rules je javio problem"
+}
+
+# OBAVEZNI UVJETI sigurnosne kopije (korak 3): bez valjane kopije nema objave ni povrata
+validate_backup() {
+  local f="$BK/rules-before-deploy.rules"
+  [ -s "$f" ] || die "nema valjane sigurnosne kopije pravila ($f)"
+  [ "$(wc -c < "$f")" -ge 100 ] || die "sigurnosna kopija je sumnjivo kratka"
+  grep -q "rules_version" "$f" && grep -q "service cloud.firestore" "$f" || die "sigurnosna kopija ne izgleda kao Firestore pravila"
+  [ -s "$BK/rules-before-deploy.sha256" ] || die "nema $BK/rules-before-deploy.sha256"
+  (cd "$BK" && sha256sum -c rules-before-deploy.sha256 >/dev/null 2>&1) || die "sha256sum -c: kopija se razlikuje od zabilježenog hasha"
+  [ -s "$BK/ruleset-name-before.txt" ] || die "nema ruleset-name-before.txt"
+}
+validate_hosting_record() {
+  [ -s "$BK/hosting-live-before.json" ] || [ -s "$BK/hosting-live-before.txt" ] || die "nije zabilježeno trenutno Hosting izdanje (hosting-live-before.json/.txt)"
+}
+
+# Provjera aktivnih pravila na poslužitelju: SVEŽ privremeni file; svaki neuspjeh REST-a = izlaz 1 (nikad stara datoteka)
+verify_live_rules() {
+  local expected="$1" tmp token rel rs rsj
+  [ -s "$expected" ] || die "očekivana pravila ($expected) ne postoje ili su prazna"
+  tmp=$(mktemp) || die "mktemp"
+  token=$(gcloud auth print-access-token) || { rm -f "$tmp"; die "gcloud nema pristupni token"; }
+  [ -n "$token" ] || { rm -f "$tmp"; die "prazan token"; }
+  local H=(-H "Authorization: Bearer $token" -H "x-goog-user-project: $P")
+  rel=$(curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/projects/$P/releases/cloud.firestore") || { rm -f "$tmp"; die "REST (release) nije uspio"; }
+  echo "$rel" | jq -e 'has("error") | not' >/dev/null || { rm -f "$tmp"; die "REST (release) vratio error objekt"; }
+  rs=$(echo "$rel" | jq -r '.rulesetName // empty')
+  { [ -n "$rs" ] && [ "$rs" != "null" ]; } || { rm -f "$tmp"; die "nema aktivnog rulesetta"; }
+  rsj=$(curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/$rs") || { rm -f "$tmp"; die "REST (ruleset) nije uspio"; }
+  echo "$rsj" | jq -e 'has("error") | not' >/dev/null || { rm -f "$tmp"; die "REST (ruleset) vratio error objekt"; }
+  echo "$rsj" | jq -j '.source.files[0].content // empty' > "$tmp"
+  [ -s "$tmp" ] || { rm -f "$tmp"; die "aktivna pravila su prazna ili null"; }
+  if ! diff <(sed -e '$a\' "$expected") <(sed -e '$a\' "$tmp") >/dev/null; then rm -f "$tmp"; die "aktivna pravila na poslužitelju se RAZLIKUJU od $expected"; fi
+  rm -f "$tmp"
+  echo "OK: aktivna pravila ($rs) odgovaraju $expected"
+}
+EOF
+cat > ~/backup/backup-rules.sh <<'EOF'
+#!/bin/bash
+# Korak 3: sigurnosna kopija aktualnih pravila + zapis Hosting izdanja. Samo ČITA iz produkcije (REST GET).
+set -euo pipefail
+OUT="$HOME/backup"; mkdir -p "$OUT"
+source "$OUT/lib.sh"
 RULES="$OUT/rules-before-deploy.rules"
-fail() { echo "ZAUSTAVLJENO: $1" >&2; exit 1; }
-[ -e "$RULES" ] && fail "$RULES već postoji — ne prepisujem sigurnosnu kopiju (premjesti je ili preimenuj svjesno)"
-command -v jq >/dev/null || fail "jq nije dostupan — koristi ručnu kopiju iz Console (vidi dolje)"
-TOKEN=$(gcloud auth print-access-token) || fail "gcloud nema pristupni token"
-[ -n "$TOKEN" ] || fail "prazan token"
+[ ! -e "$RULES" ] || die "$RULES već postoji — ne prepisujem sigurnosnu kopiju (premjesti je ili preimenuj svjesno)"
+command -v jq >/dev/null || die "jq nije dostupan — koristi ručnu kopiju iz Console (rezerva u dokumentu)"
+TOKEN=$(gcloud auth print-access-token) || die "gcloud nema pristupni token"
+[ -n "$TOKEN" ] || die "prazan token"
 HDR=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P")
-
-REL=$(curl -sS -f "${HDR[@]}" "https://firebaserules.googleapis.com/v1/projects/$P/releases/cloud.firestore") || fail "REST (release) vratio HTTP grešku"
-echo "$REL" | jq -e 'has("error") | not' >/dev/null || fail "REST (release) vratio error objekt: $(echo "$REL" | jq -c .error)"
+REL=$(curl -sS -f "${HDR[@]}" "https://firebaserules.googleapis.com/v1/projects/$P/releases/cloud.firestore") || die "REST (release) vratio HTTP grešku"
+echo "$REL" | jq -e 'has("error") | not' >/dev/null || die "REST (release) vratio error objekt"
 RS=$(echo "$REL" | jq -r '.rulesetName // empty')
-[ -n "$RS" ] && [ "$RS" != "null" ] || fail "nema aktivnog rulesetta (rulesetName je prazan/null)"
+{ [ -n "$RS" ] && [ "$RS" != "null" ]; } || die "nema aktivnog rulesetta (rulesetName je prazan/null)"
+RSJ=$(curl -sS -f "${HDR[@]}" "https://firebaserules.googleapis.com/v1/$RS") || die "REST (ruleset) vratio HTTP grešku"
+echo "$RSJ" | jq -e 'has("error") | not' >/dev/null || die "REST (ruleset) vratio error objekt"
+TMP=$(mktemp)
+echo "$RSJ" | jq -j '.source.files[0].content // empty' > "$TMP"
+[ -s "$TMP" ] || { rm -f "$TMP"; die "sadržaj pravila je prazan ili null"; }
+[ "$(wc -c < "$TMP")" -ge 100 ] || { rm -f "$TMP"; die "sadržaj pravila je sumnjivo kratak (< 100 B)"; }
+{ grep -q "rules_version" "$TMP" && grep -q "service cloud.firestore" "$TMP"; } || { rm -f "$TMP"; die "sadržaj ne izgleda kao Firestore pravila"; }
 echo "$RS" > "$OUT/ruleset-name-before.txt"
-
-RSJ=$(curl -sS -f "${HDR[@]}" "https://firebaserules.googleapis.com/v1/$RS") || fail "REST (ruleset) vratio HTTP grešku"
-echo "$RSJ" | jq -e 'has("error") | not' >/dev/null || fail "REST (ruleset) vratio error objekt: $(echo "$RSJ" | jq -c .error)"
-echo "$RSJ" | jq -r '.source.files[0].content // empty' > "$RULES.tmp"
-[ -s "$RULES.tmp" ] || { rm -f "$RULES.tmp"; fail "sadržaj pravila je prazan ili null"; }
-[ "$(wc -c < "$RULES.tmp")" -ge 100 ] || { rm -f "$RULES.tmp"; fail "sadržaj pravila je sumnjivo kratak (< 100 B)"; }
-grep -q "rules_version" "$RULES.tmp" && grep -q "service cloud.firestore" "$RULES.tmp" || { rm -f "$RULES.tmp"; fail "sadržaj ne izgleda kao Firestore pravila"; }
-mv "$RULES.tmp" "$RULES"
-sha256sum "$RULES" | tee "$OUT/rules-before-deploy.sha256"
-echo "OK: sigurnosna kopija pravila -> $RULES  ($(wc -c < "$RULES") B), ruleset: $RS"
-
-# Hosting: zabilježi trenutno aktivno izdanje (cilj povrata). Kopija pravila je već valjana; ako ovaj dio padne,
-# izlazni kod je 2 i Hosting izdanje se bilježi RUČNO iz Console (rezerva ispod) — skripta se NE pokreće ponovno.
-hfail() { echo "UPOZORENJE: $1 — pravila su sigurnosno kopirana, ali Hosting izdanje zabilježi RUČNO iz Console (vidi rezervu)" >&2; exit 2; }
+mv "$TMP" "$RULES"
+(cd "$OUT" && sha256sum rules-before-deploy.rules > rules-before-deploy.sha256)
+cat "$OUT/rules-before-deploy.sha256"
+echo "OK: sigurnosna kopija pravila -> $RULES ($(wc -c < "$RULES") B), ruleset: $RS"
+# Hosting: ako ovaj dio padne, izlaz je 2 — izdanje se bilježi RUČNO iz Console; skriptu NE pokretati ponovno
+hfail() { echo "UPOZORENJE: $1 — pravila su kopirana, ali Hosting izdanje zabilježi RUČNO iz Console (rezerva)" >&2; exit 2; }
 HC=$(curl -sS -f "${HDR[@]}" "https://firebasehosting.googleapis.com/v1beta1/sites/$P/channels/live") || hfail "REST (hosting) vratio HTTP grešku"
 echo "$HC" | jq -e 'has("error") | not' >/dev/null || hfail "REST (hosting) vratio error objekt"
 echo "$HC" | jq -e '.release.version.name' >/dev/null || hfail "hosting kanal 'live' nema aktivno izdanje"
 echo "$HC" > "$OUT/hosting-live-before.json"
 echo "OK: Hosting live izdanje: $(echo "$HC" | jq -r '.release.version.name') (objavljeno $(echo "$HC" | jq -r '.release.releaseTime'))"
 EOF
-bash ~/backup/backup-rules.sh        # MORA završiti s dvije "OK:" linije; inače STANI
-echo "izlazni kod: $?"
-ls -l ~/backup/; head -30 ~/backup/rules-before-deploy.rules      # vizualno: P1 pravila (members/households)
+cat > ~/backup/deploy-rules.sh <<'EOF'
+#!/bin/bash
+# Korak 4: objava pravila REV-04. Jedini poziv deploya je zadnja naredba; do tada svaki uvjet mora proći.
+set -euo pipefail
+source "$HOME/backup/lib.sh"
+need_confirm DA-OBJAVI-PRAVILA
+preflight_repo          # direktorij, HEAD, git status, hash pravila, guard:rules
+validate_backup         # valjana kopija prethodnih pravila (korak 3)
+validate_hosting_record # zabilježeno Hosting izdanje
+echo "Objavljujem pravila: commit $(git rev-parse --short HEAD), sha256 ${EXPECTED_RULES_SHA12}, projekt $P"
+npm run deploy:rules
+verify_live_rules "$REPO/firestore.rules"
+echo "OK: pravila REV-04 objavljena i potvrđena na poslužitelju"
+EOF
+cat > ~/backup/deploy-hosting.sh <<'EOF'
+#!/bin/bash
+# Korak 6: objava aplikacije. ZABRANJENO dok REV-04 pravila nisu potvrđena kao aktivna na poslužitelju.
+set -euo pipefail
+source "$HOME/backup/lib.sh"
+need_confirm DA-OBJAVI-HOSTING
+preflight_repo
+validate_backup
+validate_hosting_record
+[ -s "$REPO/.env.production.local" ] || die "nema $REPO/.env.production.local (konfiguracija)"
+npm run guard:env >/dev/null || die "guard:env: konfiguracija nije valjana za $P"
+verify_live_rules "$REPO/firestore.rules"   # pravila moraju biti objavljena PRIJE aplikacije; REST greška = zabrana
+echo "Objavljujem aplikaciju: commit $(git rev-parse --short HEAD), projekt $P"
+npm run deploy:hosting
+curl -sSfI "https://$P.firebaseapp.com/" | head -1
+SW=$(curl -sSf "https://$P.firebaseapp.com/sw.js") || die "sw.js nije dohvaćen"
+if echo "$SW" | grep -q 'AIza'; then die "sw.js sadrži API ključ"; fi
+echo "OK: Hosting objavljen (provjeri Release history u Console i zabilježi izdanje)"
+EOF
+cat > ~/backup/rollback-rules.sh <<'EOF'
+#!/bin/bash
+# Korak 10b: povrat pravila. Argument: backup (točna kopija iz koraka 3) ili lockdown (deny-all; NE briše podatke).
+set -euo pipefail
+source "$HOME/backup/lib.sh"
+MODE="${1:-}"
+case "$MODE" in
+  backup) need_confirm DA-VRATI-PRAVILA ;;
+  lockdown) need_confirm DA-ZAKLJUCAJ-PRAVILA ;;
+  *) die "upotreba: rollback-rules.sh backup|lockdown" ;;
+esac
+[ -d "$REPO" ] || die "ne postoji $REPO"
+[ -x "$REPO/node_modules/.bin/firebase" ] || die "firebase-tools nije instaliran u $REPO (npm ci)"
+WORK="$BK/rollback-$MODE"
+rm -rf "$WORK"; mkdir -p "$WORK"
+if [ "$MODE" = backup ]; then
+  validate_backup
+  cp "$BK/rules-before-deploy.rules" "$WORK/firestore.rules"
+  cmp -s "$BK/rules-before-deploy.rules" "$WORK/firestore.rules" || die "cmp: privremena kopija nije identična sigurnosnoj kopiji"
+else
+  cat > "$WORK/firestore.rules" <<'LOCK'
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+LOCK
+  grep -q "allow read, write: if false;" "$WORK/firestore.rules" || die "lockdown sadržaj nije ispravan"
+fi
+echo '{ "firestore": { "rules": "firestore.rules" } }' > "$WORK/firebase.json"
+jq -e '.firestore.rules == "firestore.rules"' "$WORK/firebase.json" >/dev/null || die "neispravna firebase.json"
+[ -f "$WORK/firestore.rules" ] || die "nema $WORK/firestore.rules"
+cd "$REPO"
+npx firebase deploy --only firestore:rules --project "$P" --config "$WORK/firebase.json"
+verify_live_rules "$WORK/firestore.rules"
+echo "OK: pravila vraćena ($MODE) i potvrđena na poslužitelju. Podaci u Firestoreu NISU promijenjeni."
+EOF
+for f in lib backup-rules deploy-rules deploy-hosting rollback-rules; do bash -n ~/backup/$f.sh && echo "$f.sh: sintaksa OK"; done
 ```
 
-**Očekivano:** `OK: sigurnosna kopija pravila …`, `OK: Hosting live izdanje: …`, izlazni kod `0` (izlazni kod `2` = pravila kopirana, ali Hosting treba zabilježiti ručno prema rezervi; **ne pokretati skriptu ponovno**, ona ne prepisuje postojeću kopiju), datoteke `rules-before-deploy.rules`, `rules-before-deploy.sha256`, `ruleset-name-before.txt`, `hosting-live-before.json`. **Bilo koji `ZAUSTAVLJENO:` = STANI; ne ide se na korak 4.**
+## 3. Sigurnosna kopija aktualnih pravila i Hosting izdanja (prije ikakve objave)
 
-**Rezervno (ako skripta ne radi, npr. nema `jq`):** Console → _Firestore → Rules_ → označi sav tekst → zalijepi u `~/backup/rules-before-deploy.rules` (`cat > ~/backup/rules-before-deploy.rules` pa zalijepi, Ctrl-D) i provjeri `wc -c` (> 100) i `grep -c "service cloud.firestore"` (= 1); Hosting: Console → _Hosting → Release history_ → zapiši ID/vrijeme trenutnog izdanja u `~/backup/hosting-live-before.txt`. **Bez valjane kopije pravila i zabilježenog Hosting izdanja ne ide se dalje.**
+Skripta `backup-rules.sh` samo **čita** iz produkcije (REST GET). Staje (`ZAUSTAVLJENO`, izlaz 1) na HTTP grešku, `error` objekt, `null`/prazan ruleset, prazan/prekratak sadržaj, sadržaj koji ne izgleda kao Firestore pravila, ili ako kopija već postoji (ne prepisuje se). Sadržaj se prvo piše u svježi privremeni file i u `~/backup` ide tek nakon što je validiran.
 
-Dodatno zapiši (za povrat Hostinga) commit prethodne objave aplikacije ako je poznat (P1.5 bilješke vlasnika), npr. `echo <hash> > ~/backup/hosting-previous-commit.txt`.
+```bash
+bash ~/backup/backup-rules.sh; echo "izlazni kod: $?"
+ls -l ~/backup/; head -30 ~/backup/rules-before-deploy.rules      # informativno: P1 pravila (members/households)
+```
+
+**Očekivano:** `OK: sigurnosna kopija pravila …`, `OK: Hosting live izdanje: …`, izlazni kod `0`; datoteke `rules-before-deploy.rules`, `rules-before-deploy.sha256`, `ruleset-name-before.txt`, `hosting-live-before.json`. **Izlazni kod 1 = STANI** (nema kopije). Izlazni kod `2` = pravila kopirana, ali Hosting treba zabilježiti ručno (rezerva ispod); **skriptu ne pokretati ponovno** (ne prepisuje kopiju). Bez ovih datoteka skripte iz koraka 4 i 6 **odbijaju** raditi.
+
+**Rezervno (ako skripta ne radi, npr. nema `jq`):** Console → _Firestore → Rules_ → označi sav tekst → `cat > ~/backup/rules-before-deploy.rules` (zalijepi, Ctrl-D); zatim `cd ~/backup && sha256sum rules-before-deploy.rules > rules-before-deploy.sha256`; `echo "<ime rulesetta ili ručna oznaka>" > ruleset-name-before.txt`; Hosting: Console → _Hosting → Release history_ → `echo "<ID/vrijeme trenutnog izdanja>" > ~/backup/hosting-live-before.txt`. Skripte i dalje provjeravaju veličinu i sadržaj kopije.
+
+Dodatno (neobavezno) zapiši commit prethodne objave aplikacije ako je poznat: `echo <hash> > ~/backup/hosting-previous-commit.txt`.
 
 ## 4. Objavljivanje odobrenih Firestore Rules REV-04 — _tek uz odobrenje_
 
 ```bash
-cd ~/home-inventory-pwa                                   # IZRIČITI povratak u repozitorij (prethodni koraci su radili u ~/backup)
-pwd                                                       # mora ispisati …/home-inventory-pwa
-[ "$(git rev-parse HEAD)" = "$(cat ~/backup/deploy-commit.txt)" ] || echo "STANI: HEAD se razlikuje od zabilježenog commita"
-git status --short                                        # mora biti prazno
-sha256sum firestore.rules | cut -c1-12                    # 157feee0f7ca
-npm run deploy:rules      # guard:rules → firebase deploy --only firestore:rules --project home-inventory-pwa-218be
+CONFIRM=DA-OBJAVI-PRAVILA bash ~/backup/deploy-rules.sh; echo "izlazni kod: $?"
 ```
 
-Provjera (nova pravila su objavljena, pregledom a ne pretpostavkom): Console → _Firestore → Rules_ prikazuje novo vrijeme objave i tekst koji sadrži `placementKeys` i `meta`. Neobavezno iz Cloud Shella (isti REST kao u koraku 3, bez prepisivanja kopije):
+Skripta **sama** prelazi u `~/home-inventory-pwa` i fizički ne pokreće `npm run deploy:rules` ako ijedan obavezni uvjet (§0.4) ne prođe: nema klona/neispravan direktorij, `HEAD` ≠ zabilježeni commit, nečist `git status`, hash `firestore.rules` ≠ `157feee0f7ca`, `guard:rules` pao, nevaljana sigurnosna kopija ili nezabilježeno Hosting izdanje, odsutna potvrda `CONFIRM`. Nakon deploya **sama** dohvaća aktivna pravila REST-om u svježi privremeni file i uspoređuje ih s `firestore.rules`; svaka greška REST-a ili razlika = izlaz 1 (nikad se ne čita stara datoteka).
 
-```bash
-P=home-inventory-pwa-218be; TOKEN=$(gcloud auth print-access-token); H=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P")
-RS=$(curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/projects/$P/releases/cloud.firestore" | jq -r '.rulesetName // empty')
-[ -n "$RS" ] && curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/$RS" | jq -r '.source.files[0].content // empty' > /tmp/rules-after.rules
-diff <(sed -e '$a\' firestore.rules) <(sed -e '$a\' /tmp/rules-after.rules) && echo "OK: objavljena pravila = firestore.rules"
-```
+**Očekivano:** `OK: aktivna pravila (…) odgovaraju …/firestore.rules` i `OK: pravila REV-04 objavljena i potvrđena`, izlaz `0`. Izlaz 1 **prije** deploya = ništa nije objavljeno; izlaz 1 **nakon** `npm run deploy:rules` = objava je možda prošla — pogledaj Console → _Firestore → Rules_ i javi ispis; ne nastavljaj na korak 6.
+Dodatno informativno: Console → _Firestore → Rules_ prikazuje novo vrijeme objave i tekst s `placementKeys` i `meta`.
 
-**Redoslijed je važan:** pravila idu **prije** aplikacije (nova aplikacija koristi `placementKeys`/`meta` koje stara pravila ne dopuštaju). Stara P1.5 aplikacija ne dodiruje inventar, pa objava pravila prije Hostinga ne šteti.
+**Redoslijed je važan:** pravila idu **prije** aplikacije (nova aplikacija koristi `placementKeys`/`meta` koje stara pravila ne dopuštaju); skripta za Hosting to i provodi. Stara P1.5 aplikacija ne dodiruje inventar, pa objava pravila prije Hostinga ne šteti.
 
 ## 5. Ponovna provjera Auth/članstva neposredno prije Hostinga
 
@@ -134,22 +274,18 @@ Google Auth i dva aktivna člana su **preduvjet iz §0.2** (provjereni prije prv
 ## 6. Objavljivanje Hosting aplikacije — _tek uz odobrenje_
 
 ```bash
-cd ~/home-inventory-pwa                                   # IZRIČITI povratak u repozitorij (ne u ~/backup)
-pwd                                                       # …/home-inventory-pwa
-[ "$(git rev-parse HEAD)" = "$(cat ~/backup/deploy-commit.txt)" ] || echo "STANI: HEAD se razlikuje od zabilježenog commita"
-git status --short                                        # prazno
-npm run deploy:hosting    # build:prod (sve provjere) → firebase deploy --only hosting --project home-inventory-pwa-218be
-curl -sI https://home-inventory-pwa-218be.firebaseapp.com/ | head -5     # HTTP/2 200
-curl -s  https://home-inventory-pwa-218be.firebaseapp.com/sw.js | head -c 200   # ne smije sadržavati API ključ
+CONFIRM=DA-OBJAVI-HOSTING bash ~/backup/deploy-hosting.sh; echo "izlazni kod: $?"
 ```
 
-Provjera da u objavljenom paketu nema demo podataka (prije objave, nakon `build:prod`, ili na živoj adresi):
+Skripta provodi iste obavezne uvjete kao korak 4 te još: `.env.production.local` postoji, `guard:env` prolazi, i **aktivna pravila na poslužitelju moraju biti jednaka `firestore.rules`** (REST mora uspjeti; inače je Hosting zabranjen). Tek tada pokreće `npm run deploy:hosting` (koji sam radi `build:prod` s `guard:dist`). Poslije provjerava `HTTP 200` i da `sw.js` ne sadrži API ključ.
+
+**Informativno (ručno, ne zaustavlja):** u Console → _Hosting → Release history_ zabilježi novo izdanje; i ručna provjera da u paketu nema demo podataka:
 
 ```bash
-for w in 'Garaža' 'Špajza' 'Kuhinja' 'Regal' 'DEMO' 'simulat' 'fixture'; do printf "%s: " "$w"; grep -o "$w" dist/assets/*.js | wc -l; done   # sve mora biti 0
+cd ~/home-inventory-pwa && for w in 'Garaža' 'Špajza' 'Kuhinja' 'Regal' 'DEMO' 'simulat' 'fixture'; do printf "%s: " "$w"; grep -o "$w" dist/assets/*.js | wc -l; done   # sve 0
 ```
 
-(`guard:dist` već odbija 17 demo markera; ovo je dodatna ručna provjera.) Console → _Hosting → Release history_: zapiši novo izdanje (vrijeme, commit koji si zapisao u koraku 1).
+(`guard:dist` već odbija 17 demo markera i ZAUSTAVLJA deploy; ovo je samo dodatni ispis.)
 
 ## 7. Kontrolirani početni bootstrap kućanstva (bez demo podataka) — _tek uz odobrenje_
 
@@ -180,60 +316,25 @@ Posljedica: **prije koraka 7 (bootstrap) i svakog unosa podataka u `kuca1` treba
 
 Odluka o povratu: vlasnik, uz glavni razvoj. Kriteriji: Google prijava ne radi, oštećenje/nedosljednost podataka, korisnik vidi tuđe/stare podatke, ne može se spremati zbog pravila, ili neprihvatljiv problem na Androidu.
 
-**10a. Hosting (aplikacija).** Preferirano: Console → _Hosting → Release history_ → uz izdanje iz koraka 3 → _Rollback_ (trenutno, bez builda). Alternativa iz Cloud Shella (ako je prethodni commit zabilježen u `~/backup/hosting-previous-commit.txt`): `cd ~/home-inventory-pwa && git checkout $(cat ~/backup/hosting-previous-commit.txt) && npm ci && npm run deploy:hosting`, a zatim `git checkout main`. Povrat Hostinga **ne vraća podatke** (§9). Nakon povrata na uređajima: zatvori i ponovno otvori PWA (service worker se osvježava; `sw.js` je `no-cache`); ako ostane stara ljuska — Chrome → Postavke web-mjesta → Očisti podatke samo za ovu domenu (aplikacija nema trajnih privatnih podataka).
+**10a. Hosting (aplikacija).** Preferirano: Console → _Hosting → Release history_ → uz izdanje iz koraka 3 → _Rollback_ (trenutno, bez builda). Jedini podržani put je Console Rollback. Ako nije dostupan, **ne improviziraj deploy naredbe** u Cloud Shellu — javi glavnom razvoju (ponovna objava starog commita ide kroz iste skripte i zasebno odobrenje). Povrat Hostinga **ne vraća podatke** (§9). Nakon povrata na uređajima: zatvori i ponovno otvori PWA (service worker se osvježava; `sw.js` je `no-cache`); ako ostane stara ljuska — Chrome → Postavke web-mjesta → Očisti podatke samo za ovu domenu (aplikacija nema trajnih privatnih podataka).
 
-**10b. Pravila (izvršivo iz Cloud Shella, koristi točno sigurnosnu kopiju iz koraka 3).** Firebase CLI traži `firebase.json`; zato se pravi **zasebna privremena konfiguracija** i referencira s `--config` (CLI ju koristi kao korijen projekta, `rules` je relativan prema njoj, pa se NE dira `firestore.rules` u repozitoriju):
+**10b. Pravila (izvršivo, fail-closed).** Skripta `rollback-rules.sh` koristi **točno** sigurnosnu kopiju iz koraka 3. Prije bilo kakvog deploya mora proći: postojanje i neprazan sadržaj kopije, `sha256sum -c` (kopija = zabilježeni hash), veličina ≥ 100 B, sadržaj s `rules_version` i `service cloud.firestore`, `ruleset-name-before.txt`, `cmp` privremene kopije s izvornom kopijom, valjanost privremene `firebase.json` (`jq`), instaliran `firebase-tools` u repozitoriju. **Bilo koji neuspjeh = `ZAUSTAVLJENO`, izlaz 1, deploy se ne pokreće.** CLI koristi `--config` (korijen projekta je direktorij te datoteke, `rules` je relativan prema njoj), pa se `firestore.rules` u repozitoriju NE dira.
 
 ```bash
-# 1) provjeri da je kopija valjana i nepromijenjena
-cd ~/backup
-[ -s rules-before-deploy.rules ] && [ "$(wc -c < rules-before-deploy.rules)" -ge 100 ] || echo "STANI: kopija nije valjana"
-sha256sum -c rules-before-deploy.sha256              # mora ispisati: rules-before-deploy.rules: OK
-grep -q "service cloud.firestore" rules-before-deploy.rules && echo "OK: izgleda kao Firestore pravila"
-
-# 2) privremena konfiguracija s ISTOM kopijom
-rm -rf ~/backup/rollback-rules && mkdir -p ~/backup/rollback-rules
-cp ~/backup/rules-before-deploy.rules ~/backup/rollback-rules/firestore.rules
-cat > ~/backup/rollback-rules/firebase.json <<'EOF'
-{ "firestore": { "rules": "firestore.rules" } }
-EOF
-cmp ~/backup/rules-before-deploy.rules ~/backup/rollback-rules/firestore.rules && echo "OK: konfiguracija koristi točno sigurnosnu kopiju"
-
-# 3) objava — IZ repozitorija (da npx pronađe lokalni firebase-tools); fiksni projekt, samo pravila
-cd ~/home-inventory-pwa && pwd
-npx firebase deploy --only firestore:rules --project home-inventory-pwa-218be --config ~/backup/rollback-rules/firebase.json
-
-# 4) provjera: aktivna pravila == kopija
-P=home-inventory-pwa-218be; TOKEN=$(gcloud auth print-access-token); H=(-H "Authorization: Bearer $TOKEN" -H "x-goog-user-project: $P")
-RS=$(curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/projects/$P/releases/cloud.firestore" | jq -r '.rulesetName // empty')
-curl -sS -f "${H[@]}" "https://firebaserules.googleapis.com/v1/$RS" | jq -r '.source.files[0].content // empty' > /tmp/rules-now.rules
-diff <(sed -e '$a\' ~/backup/rules-before-deploy.rules) <(sed -e '$a\' /tmp/rules-now.rules) && echo "OK: pravila vraćena na sigurnosnu kopiju"
+CONFIRM=DA-VRATI-PRAVILA bash ~/backup/rollback-rules.sh backup; echo "izlazni kod: $?"
 ```
 
-Rezervno: Console → _Firestore → Rules_ → obriši sadržaj, zalijepi `cat ~/backup/rules-before-deploy.rules` → _Publish_. Ako `cmp`/`sha256sum -c` padne — **STANI** (kopija nije ona iz koraka 3).
+Nakon deploya skripta REST-om (svježi privremeni file, svaka greška = izlaz 1) provjerava da su aktivna pravila jednaka kopiji. Rezervno (ako skripta ne radi): Console → _Firestore → Rules_ → zalijepi `cat ~/backup/rules-before-deploy.rules` → _Publish_ — samo ako je kopija prethodno provjerena (`cd ~/backup && sha256sum -c rules-before-deploy.sha256`).
 
 **Pažnja:** stara pravila **ne podržavaju** inventar (aplikacija REV-04 će prikazivati grešku/„samo pregled"); zato se pravila vraćaju zajedno s Hostingom iz 10a. Povrat pravila **ne mijenja podatke** (§9).
 
-**Hitno zaključavanje (deny-all)** — sumnja na curenje; **ne briše podatke**, samo blokira klijente (§9). Isti postupak, drugi sadržaj:
+**Hitno zaključavanje (deny-all)** — sumnja na curenje; **ne briše podatke**, samo blokira nove klijentske pristupe (§9):
 
 ```bash
-rm -rf ~/backup/lockdown && mkdir -p ~/backup/lockdown
-cat > ~/backup/lockdown/firestore.rules <<'EOF'
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
-  }
-}
-EOF
-echo '{ "firestore": { "rules": "firestore.rules" } }' > ~/backup/lockdown/firebase.json
-cd ~/home-inventory-pwa && pwd
-npx firebase deploy --only firestore:rules --project home-inventory-pwa-218be --config ~/backup/lockdown/firebase.json
+CONFIRM=DA-ZAKLJUCAJ-PRAVILA bash ~/backup/rollback-rules.sh lockdown; echo "izlazni kod: $?"
 ```
 
-(Brže: Console → _Firestore → Rules_ → zalijepi sadržaj iz `~/backup/lockdown/firestore.rules` → _Publish_.) Nakon zaključavanja aplikacija prestaje čitati i pisati; podaci ostaju netaknuti.
+(Brže, ručno: Console → _Firestore → Rules_ → zalijepi deny-all iz `~/backup/rollback-lockdown/firestore.rules` ili sadržaj iz skripte → _Publish_.) Nakon zaključavanja aplikacija prestaje čitati i pisati; podaci ostaju netaknuti.
 
 **10c. Podaci.** Bootstrap i testni unosi su jedini zapisi inventara. Povrat podataka na „prazno": Console → `households/kuca1` → obriši dokumente u `placements`, `placementKeys`, `items`, `locations` (uključujući `root`) i `meta/tree` (brisanje kolekcije u Console briše sve njezine dokumente). **Ne brisati** `households/kuca1` ni `members`. Zatim ponovi korak 7 po potrebi. Brisanje radi isključivo vlasnik, nakon što potvrdi da se u kolekcijama ne nalazi ništa što treba zadržati.
 
@@ -253,6 +354,6 @@ npx firebase deploy --only firestore:rules --project home-inventory-pwa-218be --
 2. Ne briši podatke prije nego što se utvrdi uzrok. Zabilježi: uređaj, račun (bez UID-a u chat), korake, vrijeme, snimku zaslona bez privatnog sadržaja.
 3. Provjeri članove: Console → `members` (tko je `enabled:true`), Authentication → Users.
 4. Hosting po potrebi na prethodno izdanje (10a). Nema nove objave bez zasebnog odobrenja i pregleda glavnog razvoja.
-5. Nakon utvrđenog uzroka i ispravka: ponovno objavi pravila REV-04 (korak 4; `cd ~/home-inventory-pwa` prije `npm run deploy:rules`) tek uz odobrenje.
+5. Nakon utvrđenog uzroka i ispravka: ponovno objavi pravila REV-04 skriptom iz koraka 4 (`deploy-rules.sh`) tek uz zasebno odobrenje.
 
 Sve izmjene u produkciji tijekom incidenta radi isključivo vlasnik; Claude Code/glavni razvoj ne dobivaju pristup računu.
