@@ -5,6 +5,7 @@ import {
 } from '@firebase/rules-unit-testing';
 import {
   Timestamp,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -172,7 +173,7 @@ describe('MD-03…07 premještanje lokacija (scenariji 1 i 2 iz fixturea)', () =
     b.update(doc(db, `households/${H}/meta/tree`), { rev: increment(1) });
     await assertFails(b.commit());
   });
-  it('scenarij 2 / MD-05: garage-rack pod garage-box (vlastiti potomak) => ciklus odbijen i klijentom i SERVEROM', async () => {
+  it('scenarij 2 / MD-05: garage-rack pod garage-box (vlastiti potomak) => ciklus odbijen klijentom i SERVEROM (udaljenost 2, unutar ograničene serverske provjere ≤ 6)', async () => {
     const db = as(env, UID_A);
     await expect(moveLocation(db, UID_A, 'garage-rack', 'garage-box')).rejects.toMatchObject({
       code: 'cycle',
@@ -189,7 +190,7 @@ describe('MD-03…07 premještanje lokacija (scenariji 1 i 2 iz fixturea)', () =
     await assertFails(b.commit());
     expect(await parentOf('garage-rack')).toBe('garage');
   });
-  it('MD-05 izravni potomak (dijete) i unuk također odbijeni na serveru', async () => {
+  it('MD-05 izravni potomak (udaljenost 1) i unuk (2) odbijeni na serveru (unutar ≤ 6)', async () => {
     const db = as(env, UID_A);
     for (const target of ['garage-shelf', 'garage-box']) {
       const b = writeBatch(db);
@@ -261,31 +262,58 @@ describe('MD-03…07 premještanje lokacija (scenariji 1 i 2 iz fixturea)', () =
   });
 });
 
-describe('MD-08 arhiviranje lokacije sa sadržajem', () => {
-  it('ZNANO OGRANIČENJE (ADR R-3): server NE sprječava arhiviranje lokacije koja ima potomke/smještaje — to mora blokirati klijent; ništa se ne briše', async () => {
+describe('D2 / MD-08: arhiviranje lokacija je odgođeno i zabranjeno na serveru', () => {
+  const setArchived = (db: ReturnType<typeof as>, id: string, archived: boolean, v = 2) =>
+    updateDoc(loc(db, id), {
+      archived,
+      version: v,
+      updatedAt: serverTimestamp(),
+      updatedBy: UID_A,
+    });
+  it('arhiviranje je odbijeno za listu, lokaciju s potomcima/smještajima, prostoriju i root', async () => {
     const db = as(env, UID_A);
-    // garage-shelf ima potomka (garage-box) koji ima smještaj (pl-battery-2): Rules ne mogu provjeriti "ima li djece" (nema upita)
-    await assertSucceeds(
-      updateDoc(loc(db, 'garage-shelf'), {
+    for (const id of ['pantry-box', 'garage-shelf', 'garage', 'root'])
+      await assertFails(setArchived(db, id, true));
+    expect((await getDoc(loc(db, 'garage-box'))).exists()).toBe(true);
+    expect((await getDoc(loc(db, 'garage-shelf'))).data()!.archived).toBe(false);
+  });
+  it('arhiviranje u istom upisu s drugom promjenom (preimenovanje, premještaj) je također odbijeno', async () => {
+    const db = as(env, UID_A);
+    await assertFails(
+      updateDoc(loc(db, 'garage-box'), {
         archived: true,
+        name: 'X',
         version: 2,
         updatedAt: serverTimestamp(),
         updatedBy: UID_A,
       }),
     );
-    expect((await getDoc(loc(db, 'garage-box'))).exists()).toBe(true); // ništa nije obrisano
-    expect(
-      (await getDoc(doc(db, `households/${H}/placements/pl-battery-2`))).data()!.archived,
-    ).toBe(false);
-  });
-  it('ali: u arhiviranu lokaciju se ne mogu stvarati nove podlokacije ni smještaji (server)', async () => {
-    const db = as(env, UID_A);
-    await updateDoc(loc(db, 'pantry-shelf'), {
+    const b = writeBatch(db);
+    b.update(loc(db, 'garage-box'), {
       archived: true,
+      parentId: 'living-tv',
       version: 2,
       updatedAt: serverTimestamp(),
       updatedBy: UID_A,
     });
+    b.update(doc(db, `households/${H}/meta/tree`), { rev: 1 });
+    await assertFails(b.commit());
+  });
+  it('lokacija koju je admin arhivirao ostaje arhivirana za klijenta (nema vraćanja) i ne može se premjestiti', async () => {
+    await env.withSecurityRulesDisabled(
+      async (c) =>
+        void (await updateDoc(loc(c.firestore() as never, 'garage-box'), { archived: true })),
+    );
+    const db = as(env, UID_A);
+    await assertFails(setArchived(db, 'garage-box', false));
+    expect(await outcome(moveLocation(db, UID_A, 'garage-box', 'living-tv'))).not.toBe('OK');
+  });
+  it('obrambeno: u admin-arhiviranu lokaciju se ne mogu stvarati podlokacije ni premještati lokacije', async () => {
+    await env.withSecurityRulesDisabled(
+      async (c) =>
+        void (await updateDoc(loc(c.firestore() as never, 'pantry-shelf'), { archived: true })),
+    );
+    const db = as(env, UID_A);
     expect(
       await outcome(
         createLocation(db, UID_A, {
@@ -296,46 +324,118 @@ describe('MD-08 arhiviranje lokacije sa sadržajem', () => {
         }),
       ),
     ).not.toBe('OK');
+    expect(await outcome(moveLocation(db, UID_A, 'garage-box', 'pantry-shelf'))).not.toBe('OK');
   });
-  it('root se ne može arhivirati (server); vraćanje iz arhive traži aktivnog roditelja', async () => {
+  it('uređivanje naziva i dalje radi (archived ostaje nepromijenjen)', async () => {
+    await assertSucceeds(
+      updateDoc(loc(as(env, UID_A), 'garage-box'), {
+        name: 'Kutija C',
+        version: 2,
+        updatedAt: serverTimestamp(),
+        updatedBy: UID_A,
+      }),
+    );
+  });
+});
+
+describe('Location.kind: nepromjenjiv; "house" samo za root; prostorije se ne premještaju', () => {
+  const base = (uid = UID_A) => ({
+    version: 1,
+    archived: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdBy: uid,
+    updatedBy: uid,
+  });
+  const upd = (db: ReturnType<typeof as>, id: string, extra: Record<string, unknown>, v = 2) =>
+    updateDoc(loc(db, id), {
+      version: v,
+      updatedAt: serverTimestamp(),
+      updatedBy: UID_A,
+      ...extra,
+    });
+
+  it('kind se NE može promijeniti nakon kreiranja (svaka kombinacija, uključujući house i room)', async () => {
     const db = as(env, UID_A);
-    await updateDoc(loc(db, 'pantry-shelf'), {
-      archived: true,
-      version: 2,
-      updatedAt: serverTimestamp(),
-      updatedBy: UID_A,
-    });
-    await updateDoc(loc(db, 'pantry'), {
-      archived: true,
-      version: 2,
-      updatedAt: serverTimestamp(),
-      updatedBy: UID_A,
-    });
-    // pantry-shelf se ne može vratiti dok je roditelj (pantry) arhiviran
+    for (const [id, kind] of [
+      ['garage-box', 'shelf'],
+      ['garage-box', 'house'],
+      ['garage-box', 'room'],
+      ['garage', 'box'],
+      ['kitchen-drawer', 'other'],
+      ['root', 'room'],
+      ['root', 'box'],
+    ] as const) {
+      await assertFails(upd(db, id, { kind }));
+    }
+    await assertSucceeds(upd(db, 'garage-box', { name: 'Isti kind, novo ime', kind: 'box' })); // isti kind je u redu
+  });
+  it('samo root smije imati kind=house: nova lokacija s kind=house je odbijena (s valjanim roditeljem i bez)', async () => {
+    const db = as(env, UID_A);
     await assertFails(
-      updateDoc(loc(db, 'pantry-shelf'), {
-        archived: false,
-        version: 3,
-        updatedAt: serverTimestamp(),
-        updatedBy: UID_A,
+      setDoc(loc(db, 'house2'), { ...base(), name: 'Druga kuća', parentId: 'root', kind: 'house' }),
+    );
+    await assertFails(
+      setDoc(loc(db, 'house3'), {
+        ...base(),
+        name: 'Treća kuća',
+        parentId: 'garage',
+        kind: 'house',
       }),
+    );
+    await assertFails(
+      createLocation(db, UID_A, { id: 'house4', name: 'Kuća 4', parentId: 'root', kind: 'house' }),
+    );
+  });
+  it('root uvijek ostaje house: kreiranje roota s drugim kindom je odbijeno (svježe kućanstvo bez roota)', async () => {
+    await env.withSecurityRulesDisabled(
+      async (c) => void (await deleteDoc(loc(c.firestore() as never, 'root'))),
+    );
+    const db = as(env, UID_A);
+    // dijete ne može nastati bez roota; root se ne može stvoriti kao nešto drugo
+    await assertFails(
+      setDoc(loc(db, 'root'), { ...base(), name: 'Kuća', parentId: null, kind: 'room' }),
+    );
+    await assertFails(
+      setDoc(loc(db, 'root'), { ...base(), name: 'Kuća', parentId: null, kind: 'box' }),
     );
     await assertSucceeds(
-      updateDoc(loc(db, 'pantry'), {
-        archived: false,
-        version: 3,
+      setDoc(loc(db, 'root'), { ...base(), name: 'Kuća', parentId: null, kind: 'house' }),
+    );
+  });
+  it('prostorije (kind=room) se NE premještaju na serveru — ni sirovim batchom s ispravnim rev-om i bez ciklusa', async () => {
+    const db = as(env, UID_A);
+    for (const [room, target] of [
+      ['kitchen', 'living'],
+      ['garage', 'hall-cabinet'],
+      ['hall', 'kitchen-cabinet'],
+    ] as const) {
+      const b = writeBatch(db);
+      b.update(loc(db, room), {
+        parentId: target,
+        version: 2,
         updatedAt: serverTimestamp(),
         updatedBy: UID_A,
-      }),
-    );
-    await assertSucceeds(
-      updateDoc(loc(db, 'pantry-shelf'), {
-        archived: false,
-        version: 3,
-        updatedAt: serverTimestamp(),
-        updatedBy: UID_A,
-      }),
-    );
+      });
+      b.update(doc(db, `households/${H}/meta/tree`), { rev: 1 });
+      await assertFails(b.commit());
+      expect(await parentOf(room)).toBe('root');
+    }
+    // referentni protokol to javlja prije pisanja (bolja poruka), server je zadnja linija obrane
+    await expect(moveLocation(db, UID_A, 'kitchen', 'living')).rejects.toMatchObject({
+      code: 'room-immovable',
+    });
+    expect(await rev()).toBe(0);
+  });
+  it('ne-prostorije se i dalje premještaju (kutija, polica, ormar, ladica) — pozitivna kontrola', async () => {
+    const db = as(env, UID_A);
+    await assertSucceeds(moveLocation(db, UID_A, 'garage-box', 'living-tv'));
+    await assertSucceeds(moveLocation(db, UID_A, 'garage-rack', 'kitchen'));
+    await assertSucceeds(moveLocation(db, UID_A, 'kitchen-drawer', 'hall-cabinet'));
+    await assertSucceeds(moveLocation(db, UID_A, 'bedroom-wardrobe', 'hall'));
+  });
+  it('prostorija se može preimenovati (samo premještaj je zabranjen)', async () => {
+    await assertSucceeds(upd(as(env, UID_A), 'kitchen', { name: 'Velika kuhinja' }));
   });
 });
 
@@ -390,9 +490,7 @@ describe('MD-14 / ACL-29/30 nepromjenjiva i sistemska polja, tipovi', () => {
     await assertFails(upd(db, 'garage-box', { archived: 'false' }));
   });
   it('odbijeno: brisanje lokacije (nema tvrdog brisanja u P2)', async () => {
-    await assertFails(
-      (await import('firebase/firestore')).deleteDoc(loc(as(env, UID_A), 'garage-box')),
-    );
+    await assertFails(deleteDoc(loc(as(env, UID_A), 'garage-box')));
   });
   it('odbijeno: promjena roditelja BEZ meta/tree bump-a ili sa starim rev-om (CAS)', async () => {
     const db = as(env, UID_A);
