@@ -12,6 +12,8 @@ export type ActionStatus =
   | { kind: 'saved'; label: string; at: number }
   | { kind: 'error'; message: string };
 
+export type RunResult<T> = { ok: true; value: T } | { ok: false };
+
 export interface UseInventory {
   opening: boolean;
   openError: string | null;
@@ -19,8 +21,12 @@ export interface UseInventory {
   repo: InventoryRepository | null;
   status: ActionStatus;
   busy: boolean;
-  /** Izvrši online operaciju; stanje 'saved' postavlja tek nakon potvrde poslužitelja. */
-  run<T>(label: string, fn: (repo: InventoryRepository) => Promise<T>): Promise<T | undefined>;
+  /**
+   * Izvrši online operaciju; stanje 'saved' postavlja tek nakon potvrde poslužitelja.
+   * Rezultat je EKSPLICITAN ({ ok }): `undefined` nije pouzdan znak neuspjeha jer i uspješne operacije mogu vratiti
+   * ništa. Obrasci smiju obrisati korisnikov unos ISKLJUČIVO kad je ok === true (P2B-REV-02).
+   */
+  run<T>(label: string, fn: (repo: InventoryRepository) => Promise<T>): Promise<RunResult<T>>;
 }
 
 /**
@@ -80,26 +86,23 @@ export function useInventory(port: InventoryPort, onRevoked: () => void): UseInv
   }, [port]);
 
   const run = useCallback(
-    async <T>(
-      label: string,
-      fn: (r: InventoryRepository) => Promise<T>,
-    ): Promise<T | undefined> => {
-      if (!repo || busyRef.current) return undefined;
+    async <T>(label: string, fn: (r: InventoryRepository) => Promise<T>): Promise<RunResult<T>> => {
+      if (!repo || busyRef.current) return { ok: false };
       busyRef.current = true;
       setBusy(true);
       setStatus({ kind: 'saving', label });
       try {
         const out = await fn(repo);
         setStatus({ kind: 'saved', label, at: Date.now() });
-        return out;
+        return { ok: true, value: out };
       } catch (e) {
         if (isDomainError(e) && e.code === 'access-revoked') {
           setStatus({ kind: 'idle' }); // opoziv nije "greška spremanja": bez ikakvog statusa, panel se uklanja
           revokedRef.current();
-          return undefined;
+          return { ok: false };
         }
         setStatus({ kind: 'error', message: messageFor(e) });
-        return undefined;
+        return { ok: false };
       } finally {
         busyRef.current = false;
         setBusy(false);

@@ -58,13 +58,18 @@ export interface InventoryRepository {
   }): Promise<{ id: string }>;
   renameLocation(id: string, name: string, expectedVersion: number): Promise<void>;
   moveLocation(id: string, newParentId: string, expectedVersion?: number): Promise<void>;
-  createItem(input: {
+  /**
+   * P2B-REV-04: JEDINI način stvaranja predmeta — naziv i početna lokacija su obavezni (P2 handoff). Item, prvi
+   * Placement i placementKey nastaju ATOMARNO u jednoj transakciji (nema predmeta bez smještaja nakon greške).
+   */
+  createItemWithPlacement(input: {
     name: string;
     kind: ItemKind;
+    locationId: string;
     aliases?: string[];
     category?: string | null;
     note?: string | null;
-  }): Promise<{ id: string }>;
+  }): Promise<{ itemId: string; placementId: string }>;
   updateItem(id: string, patch: ItemPatch, expectedVersion: number): Promise<void>;
   addPlacement(itemId: string, locationId: string): Promise<{ id: string }>;
   movePlacement(id: string, newLocationId: string, expectedVersion: number): Promise<void>;
@@ -278,21 +283,26 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
       }
     },
 
-    async createItem({ name, kind, aliases, category, note }) {
+    async createItemWithPlacement({ name, kind, locationId, aliases, category, note }) {
       const cleaned = cleanName(name);
       checkItemKind(kind);
+      if (!locationId || !locationId.trim())
+        throw new DomainError('invalid-input', 'Početna lokacija je obavezna.');
       const data = {
         aliases: cleanAliases(aliases),
         category: cleanOptional(category, LIMITS.category, 'Kategorija'),
         note: cleanOptional(note, LIMITS.note, 'Napomena'),
       };
-      const id = newId();
+      const hooks = once();
+      const itemId = newId();
+      const placementId = newId();
       await run((mark) =>
         commitTx(mark, async (tx) => {
-          // Uvijek čitaj prije pisanja: bez veze čitanje pada PRIJE commita pa je ishod sigurno 'offline'
-          // (a ne 'outcome-unknown'); usput potvrđuje i članstvo.
-          await tx.get(doc(db, `households/${householdId}`));
-          tx.set(ref(`items/${id}`), {
+          // Čitanje lokacije PRIJE pisanja: bez veze pada prije commita => sigurno 'offline' (ne 'outcome-unknown').
+          const loc = await tx.get(ref(`locations/${locationId}`));
+          if (!loc.exists() || loc.data().archived) throw new DomainError('bad-location');
+          await hooks.afterReads?.();
+          tx.set(ref(`items/${itemId}`), {
             name: cleaned,
             kind,
             ...data,
@@ -300,9 +310,20 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
             archived: false,
             ...stamp(),
           });
+          tx.set(ref(`placements/${placementId}`), {
+            itemId,
+            locationId,
+            version: 1,
+            archived: false,
+            ...stamp(),
+          });
+          tx.set(
+            ref(`placementKeys/${keyIdFor(kind, itemId, locationId)}`),
+            kind === 'unique' ? { placementId, itemId } : { placementId, itemId, locationId },
+          );
         }),
       );
-      return { id };
+      return { itemId, placementId };
     },
 
     async updateItem(id, patch, expectedVersion) {

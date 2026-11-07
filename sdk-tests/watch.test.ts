@@ -101,7 +101,11 @@ describe('metadata signali pravog SDK-a i vrata', () => {
     const raw = rawLog(L.session.db, 'items');
     const { states, un } = collect(L.session.db);
     await waitFor(() => states.find((s) => s.status === 'ready'));
-    await L.repo.createItem({ name: 'Bez pending', kind: 'type' });
+    await L.repo.createItemWithPlacement({
+      name: 'Bez pending',
+      kind: 'type',
+      locationId: 'garage-tool',
+    });
     await L.repo.updateItem('hammer', { name: 'Bez pending 2' }, 1);
     await waitFor(() => raw.log.some((r) => r.size === 30));
     await sleep(300);
@@ -151,6 +155,95 @@ describe('integritet stabla samo nad cjelovitim skupom', () => {
   });
 });
 
+describe('P2B-REV-03: prazne lokacije s postojećim podacima (pravi SDK)', () => {
+  const seedOnly = async (docs: Record<string, object>) => {
+    await seedEmptyHousehold([[pa.uid, true]]);
+    await adminWrite(async (db) => {
+      const { setDoc, doc: d, Timestamp } = await import('firebase/firestore');
+      const now = Timestamp.now();
+      for (const [path, data] of Object.entries(docs))
+        await setDoc(d(db, `households/${H}/${path}`), {
+          ...data,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: 's',
+          updatedBy: 's',
+        });
+    });
+  };
+  const item = {
+    name: 'Siroče',
+    kind: 'type',
+    aliases: [],
+    category: null,
+    note: null,
+    version: 1,
+    archived: false,
+  };
+  const placement = { itemId: 'siroce', locationId: 'nema-lokacije', version: 1, archived: false };
+
+  it('0 lokacija + postoji predmet => inconsistent (NE needsBootstrap, NE ready); stanje bez podataka', async () => {
+    await seedOnly({ 'items/siroce': item });
+    const L = await openLive(pa);
+    const { states, un } = collect(L.session.db);
+    const s = await waitFor(() =>
+      states.find((x) => x.status === 'inconsistent' || x.status === 'ready'),
+    );
+    expect(s).toEqual({ status: 'inconsistent', items: 1, placements: 0 });
+    expect(states.some((x) => x.status === 'ready')).toBe(false);
+    expect(JSON.stringify(states)).not.toContain('Siroče');
+    un();
+    await L.session.dispose();
+  });
+  it('0 lokacija + postoji smještaj => inconsistent; predmet i smještaj zajedno => oba broja', async () => {
+    await seedOnly({ 'placements/p1': placement });
+    let L = await openLive(pa);
+    let c = collect(L.session.db);
+    expect(
+      await waitFor(() =>
+        c.states.find((x) => x.status === 'inconsistent' || x.status === 'ready'),
+      ),
+    ).toEqual({ status: 'inconsistent', items: 0, placements: 1 });
+    c.un();
+    await L.session.dispose();
+    await seedOnly({ 'items/siroce': item, 'placements/p1': placement });
+    L = await openLive(pa);
+    c = collect(L.session.db);
+    expect(
+      await waitFor(() =>
+        c.states.find((x) => x.status === 'inconsistent' || x.status === 'ready'),
+      ),
+    ).toEqual({ status: 'inconsistent', items: 1, placements: 1 });
+    c.un();
+    await L.session.dispose();
+  });
+  it('zaista prazno kućanstvo (sve tri kolekcije prazne) => ready s needsBootstrap (kontrola)', async () => {
+    await seedEmptyHousehold([[pa.uid, true]]);
+    const L = await openLive(pa);
+    const { states, un } = collect(L.session.db);
+    const s = await waitFor(() =>
+      states.find((x) => x.status === 'ready' || x.status === 'inconsistent'),
+    );
+    expect(s.status === 'ready' && s.needsBootstrap).toBe(true);
+    un();
+    await L.session.dispose();
+  });
+  it('LAŽNI ALARM isključen: keš sadrži samo 1 predmet, lokacije u kešu prazne, a na poslužitelju postoje — nikad inconsistent ni needsBootstrap', async () => {
+    const L = await openLive(pa);
+    await getDocFromServer(doc(L.session.db, `households/${H}/items/hammer`)); // keš: 1 predmet, 0 lokacija
+    const raw = rawLog(L.session.db, 'locations');
+    const { states, un } = collect(L.session.db);
+    await waitFor(() => states.find((x) => x.status === 'ready'));
+    console.log('SDK signali (prazne lokacije u kešu):', JSON.stringify(raw.log));
+    expect(states.some((x) => x.status === 'inconsistent')).toBe(false);
+    expect(states.some((x) => x.status === 'ready' && x.needsBootstrap)).toBe(false);
+    for (const x of states) if (x.status === 'ready') expect(x.data.locations).toHaveLength(22);
+    raw.un();
+    un();
+    await L.session.dispose();
+  });
+});
+
 describe('živo ažuriranje dvaju korisnika', () => {
   it('promjene jednog korisnika stižu drugom putem listenera (nove verzije), bez ponovnog učitavanja', async () => {
     const pb = await signInPrimary('watchB');
@@ -162,8 +255,12 @@ describe('živo ažuriranje dvaju korisnika', () => {
     const B = await openLive(pb);
     const { states, un } = collect(A.session.db);
     await waitFor(() => states.find((s) => s.status === 'ready'));
-    const { id } = await B.repo.createItem({ name: 'Od korisnika B', kind: 'type' });
-    const pl = await B.repo.addPlacement(id, 'hall-cabinet');
+    const { itemId: id, placementId } = await B.repo.createItemWithPlacement({
+      name: 'Od korisnika B',
+      kind: 'type',
+      locationId: 'hall-cabinet',
+    });
+    const pl = { id: placementId };
     await waitFor(() => {
       const s = states.at(-1);
       return (

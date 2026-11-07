@@ -52,7 +52,13 @@ describe('prekid mreže: nema skrivenog reda, nema automatskog naknadnog slanja'
     proxy.down(); // STVARNI prekid: sve veze uništene, nove odbijene
     const t0 = Date.now();
     const results = await Promise.all([
-      outcome(L.repo.createItem({ name: 'OFFLINE-predmet', kind: 'type' })),
+      outcome(
+        L.repo.createItemWithPlacement({
+          name: 'OFFLINE-predmet',
+          kind: 'type',
+          locationId: 'garage-tool',
+        }),
+      ),
       outcome(
         L.repo.createLocation({ name: 'OFFLINE-lokacija', parentId: 'garage-tool', kind: 'shelf' }),
       ),
@@ -137,6 +143,48 @@ describe('prekid mreže: nema skrivenog reda, nema automatskog naknadnog slanja'
     ).toBe('garage-shelf');
     L.hooks.afterReads = undefined;
     await L.repo.updateItem('hammer', { name: 'Nakon provjere' }, 1); // izričiti novi pokušaj uspijeva
+    un();
+    await L.session.dispose();
+  }, 180000);
+
+  it('REV-04: atomarno stvaranje predmeta — pad veze između čitanja i commita => outcome-unknown, a NIJEDAN od Item/Placement/ključ ne postoji (nema djelomičnog stanja)', async () => {
+    await seedFor([[pa.uid, true]]);
+    const L = await openLive(pa, { emulator: { ...EMU, firestorePort: proxyPort } });
+    const states: InventoryState[] = [];
+    const un = watchInventory(L.session.db, H, (s) => states.push(s));
+    await waitFor(() => states.find((s) => s.status === 'ready'));
+    L.hooks.afterReads = async () => proxy.down();
+    const r = await outcome(
+      L.repo.createItemWithPlacement({
+        name: 'ATOMARNO-nepoznato',
+        kind: 'type',
+        locationId: 'garage-tool',
+      }),
+    );
+    expect(r).toBe('ERR:outcome-unknown');
+    proxy.up();
+    await waitFor(() => states.at(-1)?.status === 'ready', 60000);
+    await sleep(3000);
+    expect((await names('items')).some((n) => n.startsWith('ATOMARNO'))).toBe(false);
+    const orphanKeys = await adminRead(
+      async (db) =>
+        (await getDocsFromServer(collection(db as never, `households/${H}/placementKeys`))).docs
+          .length,
+    );
+    expect(orphanKeys).toBe(32); // samo seed (32 aktivna smještaja iz demo kuće)
+    expect(
+      await adminRead(
+        async (db) =>
+          (await getDocsFromServer(collection(db as never, `households/${H}/placements`))).size,
+      ),
+    ).toBe(32);
+    L.hooks.afterReads = undefined;
+    const ok = await L.repo.createItemWithPlacement({
+      name: 'ATOMARNO-ponovljeno',
+      kind: 'type',
+      locationId: 'garage-tool',
+    });
+    expect(ok.itemId).toBeTruthy();
     un();
     await L.session.dispose();
   }, 180000);

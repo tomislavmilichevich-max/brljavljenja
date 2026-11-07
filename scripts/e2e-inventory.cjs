@@ -142,17 +142,30 @@ const saved = (page, text) =>
       .filter({ hasText: 'Kuća › Kuhinja › Ormar1' })
       .waitFor({ timeout: 20000 });
     check('INV-5 predmet + prvi smještaj; prikazana puna putanja', true);
+    // REV-01: bez početne lokacije predmet se NE može stvoriti (poruka, ništa na poslužitelju, unos ostaje)
     await A.getByLabel('Naziv predmeta').fill('Baterije');
     await A.getByLabel('Vrsta predmeta').selectOption('type');
+    await A.getByLabel('Početna lokacija').selectOption(''); // obrazac pamti zadnju lokaciju; za negativni test je očisti
+    const addBtnDisabledNoLoc = await A.getByRole('button', { name: 'Dodaj predmet' }).isDisabled();
+    await A.getByLabel('Naziv predmeta').press('Enter');
+    await A.getByTestId('item-loc-hint').waitFor({ timeout: 5000 });
+    await A.waitForTimeout(800);
+    check(
+      'INV-5b REV-01: bez početne lokacije: vidljiva napomena "obavezna", gumb onemogućen, Enter ne šalje, predmet NE nastaje, uneseni naziv ostaje',
+      addBtnDisabledNoLoc &&
+        !(await names('items')).includes('Baterije') &&
+        (await A.getByLabel('Naziv predmeta').inputValue()) === 'Baterije',
+    );
+    await A.getByLabel('Početna lokacija').selectOption({ label: 'Kuća › Kuhinja › Ormar1' });
     await A.getByRole('button', { name: 'Dodaj predmet' }).click();
     const bat = A.getByTestId('item-list').locator('li', { hasText: 'Baterije' }).first();
-    await bat.getByText('bez smještaja').waitFor({ timeout: 20000 });
-    await bat.locator('summary').click();
-    await bat
-      .getByLabel('Dodaj smještaj za Baterije')
-      .selectOption({ label: 'Kuća › Kuhinja › Ormar1' });
-    await bat.getByRole('button', { name: 'Dodaj smještaj' }).click();
     await bat.getByTestId('pl-path').first().waitFor({ timeout: 20000 });
+    check(
+      'INV-5c REV-04: predmet i prvi smještaj nastali ATOMARNO (nema stanja "bez smještaja"); naziv obrisan tek nakon uspjeha',
+      (await bat.getByText('bez smještaja').count()) === 0 &&
+        (await A.getByLabel('Naziv predmeta').inputValue()) === '',
+    );
+    await bat.locator('summary').click();
     await bat.getByLabel('Dodaj smještaj za Baterije').selectOption({ label: 'Kuća' });
     await bat.getByRole('button', { name: 'Dodaj smještaj' }).click();
     await bat.getByTestId('pl-path').nth(1).waitFor({ timeout: 20000 });
@@ -202,6 +215,7 @@ const saved = (page, text) =>
       .locator('li', { hasText: 'Čekić' })
       .waitFor({ timeout: 20000 });
     await A.getByLabel('Naziv predmeta').fill('Uživo predmet');
+    await A.getByLabel('Početna lokacija').selectOption({ label: 'Kuća' });
     await A.getByRole('button', { name: 'Dodaj predmet' }).click();
     await B.getByTestId('item-list')
       .locator('li', { hasText: 'Uživo predmet' })
@@ -216,6 +230,7 @@ const saved = (page, text) =>
     await ctxA.setOffline(true);
     await A.getByTestId('inv-stale').waitFor({ timeout: 45000 });
     await A.getByLabel('Naziv predmeta').fill('OFFLINE-predmet');
+    await A.getByLabel('Početna lokacija').selectOption({ label: 'Kuća' });
     const addDisabled = await A.getByRole('button', { name: 'Dodaj predmet' }).isDisabled();
     await A.getByLabel('Naziv predmeta').press('Enter'); // Enter ne smije zaobići onemogućeni gumb
     await A.waitForTimeout(1500);
@@ -228,6 +243,11 @@ const saved = (page, text) =>
         !statusAfterEnter.includes('Spremanje') &&
         !statusAfterEnter.includes('spremljeno'),
       statusAfterEnter.slice(0, 80),
+    );
+    check(
+      'INV-10b REV-02: nakon blokiranog pokušaja offline uneseni naziv i odabrana lokacija OSTAJU u obrascu',
+      (await A.getByLabel('Naziv predmeta').inputValue()) === 'OFFLINE-predmet' &&
+        (await A.getByLabel('Početna lokacija').inputValue()) !== '',
     );
     await ctxA.setOffline(false);
     await A.getByTestId('inv-stale').waitFor({ state: 'detached', timeout: 60000 });
@@ -245,6 +265,7 @@ const saved = (page, text) =>
       enabled: false,
     });
     await A.getByLabel('Naziv predmeta').fill('Okidač promjene');
+    await A.getByLabel('Početna lokacija').selectOption({ label: 'Kuća' });
     await A.getByRole('button', { name: 'Dodaj predmet' }).click();
     let viaListener = true;
     await B.getByRole('heading', { name: 'Nemaš pristup' })

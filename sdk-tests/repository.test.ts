@@ -59,6 +59,12 @@ const allLocs = () =>
       (d) => ({ id: d.id, parentId: d.data().parentId as string | null }),
     ),
   );
+const itemNames = async () =>
+  adminRead(async (db) =>
+    (await getDocsFromServer(collection(db as never, `households/${H}/items`))).docs.map(
+      (d) => d.data().name as string,
+    ),
+  );
 const keyIds = async () =>
   (
     await adminRead(async (db) =>
@@ -166,9 +172,13 @@ describe('lokacije: kreiranje, preimenovanje, validacija, P2-LOC-ROOM-01', () =>
 });
 
 describe('predmeti: kreiranje, uređivanje, verzije', () => {
-  it('stvara type i unique predmet s opcionalnim poljima; naziv + vrsta su jedino obavezni', async () => {
-    const a = await A.repo.createItem({ name: 'Ljestve', kind: 'unique' });
-    expect(await docData(`items/${a.id}`)).toMatchObject({
+  it('REV-04: stvara type i unique predmet ATOMARNO s prvom lokacijom (Item + Placement + ključ u jednoj transakciji)', async () => {
+    const a = await A.repo.createItemWithPlacement({
+      name: 'Ljestve',
+      kind: 'unique',
+      locationId: 'hall-cabinet',
+    });
+    expect(await docData(`items/${a.itemId}`)).toMatchObject({
       name: 'Ljestve',
       kind: 'unique',
       aliases: [],
@@ -177,41 +187,133 @@ describe('predmeti: kreiranje, uređivanje, verzije', () => {
       version: 1,
       archived: false,
     });
-    const b = await B.repo.createItem({
+    expect(await docData(`placements/${a.placementId}`)).toMatchObject({
+      itemId: a.itemId,
+      locationId: 'hall-cabinet',
+      version: 1,
+      archived: false,
+    });
+    expect(await docData(`placementKeys/${a.itemId}__unique`)).toEqual({
+      placementId: a.placementId,
+      itemId: a.itemId,
+    });
+    const b = await B.repo.createItemWithPlacement({
       name: 'Vijci',
       kind: 'type',
+      locationId: 'garage-tool',
       aliases: [' vijak ', 'vijak', 'šraf', ''],
       category: ' Alat ',
       note: '   ',
     });
-    expect(await docData(`items/${b.id}`)).toMatchObject({
+    expect(await docData(`items/${b.itemId}`)).toMatchObject({
       aliases: ['vijak', 'šraf'],
       category: 'Alat',
       note: null,
       createdBy: pb.uid,
     });
-  });
-  it('validacija ulaza', async () => {
-    await rejects(A.repo.createItem({ name: '', kind: 'type' })).toMatchObject({
-      code: 'invalid-input',
+    expect(await docData(`placementKeys/${b.itemId}__at__garage-tool`)).toEqual({
+      placementId: b.placementId,
+      itemId: b.itemId,
+      locationId: 'garage-tool',
     });
-    await rejects(A.repo.createItem({ name: 'X', kind: 'nešto' as never })).toMatchObject({
+  });
+  it('REV-01: NEMA načina da se predmet stvori bez lokacije — repozitorij nema takvu operaciju, a prazna/nevaljana lokacija se odbija', async () => {
+    expect('createItem' in A.repo).toBe(false);
+    const before = (await itemNames()).length;
+    for (const loc of ['', '   ', undefined as never]) {
+      await rejects(
+        A.repo.createItemWithPlacement({ name: 'Bez lokacije', kind: 'type', locationId: loc }),
+      ).toMatchObject({ code: 'invalid-input' });
+    }
+    await rejects(
+      A.repo.createItemWithPlacement({
+        name: 'Nepostojeća',
+        kind: 'type',
+        locationId: 'ne-postoji',
+      }),
+    ).toMatchObject({ code: 'bad-location' });
+    expect((await itemNames()).length).toBe(before); // nikakav predmet nije nastao
+  });
+  it('arhivirana lokacija (admin) -> bad-location; ništa se ne zapisuje', async () => {
+    await (
+      await admin()
+    ).withSecurityRulesDisabled(async (c) => {
+      const { updateDoc } = await import('firebase/firestore');
+      await updateDoc(doc(c.firestore(), `households/${H}/locations/hall-cabinet`), {
+        archived: true,
+      });
+    });
+    const before = (await itemNames()).length;
+    await rejects(
+      A.repo.createItemWithPlacement({
+        name: 'U arhiviranoj',
+        kind: 'type',
+        locationId: 'hall-cabinet',
+      }),
+    ).toMatchObject({ code: 'bad-location' });
+    expect((await itemNames()).length).toBe(before);
+  });
+  it('validacija ulaza: ništa se ne zapisuje ni kad je lokacija ispravna', async () => {
+    const before = (await itemNames()).length;
+    const base = { kind: 'type' as const, locationId: 'garage-tool' };
+    await rejects(A.repo.createItemWithPlacement({ ...base, name: '' })).toMatchObject({
       code: 'invalid-input',
     });
     await rejects(
-      A.repo.createItem({
+      A.repo.createItemWithPlacement({ ...base, name: 'X', kind: 'nešto' as never }),
+    ).toMatchObject({ code: 'invalid-input' });
+    await rejects(
+      A.repo.createItemWithPlacement({
+        ...base,
         name: 'X',
-        kind: 'type',
         aliases: Array.from({ length: 21 }, (_, i) => `a${i}`),
       }),
     ).toMatchObject({ code: 'invalid-input' });
     await rejects(
-      A.repo.createItem({ name: 'X', kind: 'type', note: 'n'.repeat(1001) }),
+      A.repo.createItemWithPlacement({ ...base, name: 'X', note: 'n'.repeat(1001) }),
     ).toMatchObject({ code: 'invalid-input' });
     await rejects(
-      A.repo.createItem({ name: 'X', kind: 'type', category: 'c'.repeat(61) }),
+      A.repo.createItemWithPlacement({ ...base, name: 'X', category: 'c'.repeat(61) }),
     ).toMatchObject({ code: 'invalid-input' });
     await rejects(A.repo.updateItem('hammer', {}, 1)).toMatchObject({ code: 'invalid-input' });
+    expect((await itemNames()).length).toBe(before);
+  });
+  it('istodobno A i B stvaraju RAZLIČITE predmete s prvom lokacijom u ISTOJ lokaciji (prisilno preklapanje): oba uspiju, svaki ima točno jedan ključ', async () => {
+    const wait = barrier(2);
+    A.hooks.afterReads = wait;
+    B.hooks.afterReads = wait;
+    const [ra, rb] = await Promise.all([
+      outcome(
+        A.repo.createItemWithPlacement({
+          name: 'Paralelno A',
+          kind: 'type',
+          locationId: 'hall-cabinet',
+        }),
+      ),
+      outcome(
+        B.repo.createItemWithPlacement({
+          name: 'Paralelno B',
+          kind: 'unique',
+          locationId: 'hall-cabinet',
+        }),
+      ),
+    ]);
+    expect([ra, rb]).toEqual(['OK', 'OK']);
+    expect(
+      (await keyIds()).filter((k) => k.endsWith('__at__hall-cabinet') || k.endsWith('__unique'))
+        .length,
+    ).toBeGreaterThanOrEqual(2);
+  });
+  it('10 uzastopnih atomarnih stvaranja naizmjence A/B: sva uspiju (limit pristupa dokumentima nije probijen)', async () => {
+    for (let i = 0; i < 10; i++) {
+      const repo = i % 2 ? B.repo : A.repo;
+      await repo.createItemWithPlacement({
+        name: `Niz ${i}`,
+        kind: i % 3 ? 'type' : 'unique',
+        locationId: 'bathroom-cabinet',
+      });
+    }
+    expect((await itemNames()).filter((n) => n?.startsWith('Niz ')).length).toBe(10);
   });
   it('uređivanje samo navedenih polja; ne dira smještaje; zastarjela verzija -> changed-elsewhere', async () => {
     const before = JSON.stringify(await docData('placements/pl-hammer-1'));
@@ -236,12 +338,15 @@ describe('predmeti: kreiranje, uređivanje, verzije', () => {
 
 describe('smještaji: više Placemenata istog Itema, duplikati, premještaj samo odabranog, arhiviranje', () => {
   it('type predmet na više lokacija; svaki je zaseban Placement s vlastitim ključem', async () => {
-    const it1 = await A.repo.createItem({ name: 'Žarulje', kind: 'type' });
-    const p1 = await A.repo.addPlacement(it1.id, 'hall-cabinet');
-    const p2 = await B.repo.addPlacement(it1.id, 'bathroom-cabinet');
-    const p3 = await A.repo.addPlacement(it1.id, 'garage-tool');
-    expect(new Set([p1.id, p2.id, p3.id]).size).toBe(3);
-    expect((await keyIds()).filter((k) => k.startsWith(`${it1.id}__`)).length).toBe(3);
+    const it1 = await A.repo.createItemWithPlacement({
+      name: 'Žarulje',
+      kind: 'type',
+      locationId: 'hall-cabinet',
+    });
+    const p2 = await B.repo.addPlacement(it1.itemId, 'bathroom-cabinet');
+    const p3 = await A.repo.addPlacement(it1.itemId, 'garage-tool');
+    expect(new Set([it1.placementId, p2.id, p3.id]).size).toBe(3);
+    expect((await keyIds()).filter((k) => k.startsWith(`${it1.itemId}__`)).length).toBe(3);
   });
   it('duplikat (isti item, ista lokacija) -> duplicate-placement; unique na drugu lokaciju -> duplicate-placement', async () => {
     await rejects(A.repo.addPlacement('battery', 'living-drawer')).toMatchObject({
@@ -404,28 +509,38 @@ describe('istodobne izmjene dvaju korisnika (prave transakcije, prisilno preklap
     expect([ra, rb]).toEqual(['OK', 'OK']);
   });
   it('MD-11 isti item na istu lokaciju istodobno: točno jedan aktivan smještaj', async () => {
-    const it1 = await A.repo.createItem({ name: 'Traka', kind: 'type' });
+    const it1 = await A.repo.createItemWithPlacement({
+      name: 'Traka',
+      kind: 'type',
+      locationId: 'garage-tool',
+    });
     const wait = barrier(2);
     A.hooks.afterReads = wait;
     B.hooks.afterReads = wait;
     const [ra, rb] = await Promise.all([
-      outcome(A.repo.addPlacement(it1.id, 'hall-cabinet')),
-      outcome(B.repo.addPlacement(it1.id, 'hall-cabinet')),
+      outcome(A.repo.addPlacement(it1.itemId, 'hall-cabinet')),
+      outcome(B.repo.addPlacement(it1.itemId, 'hall-cabinet')),
     ]);
     expect([ra, rb].filter((r) => r === 'OK')).toHaveLength(1);
     expect([ra, rb]).toContain('ERR:duplicate-placement');
-    expect((await keyIds()).filter((k) => k === `${it1.id}__at__hall-cabinet`)).toHaveLength(1);
+    expect((await keyIds()).filter((k) => k === `${it1.itemId}__at__hall-cabinet`)).toHaveLength(1);
   });
   it('MD-10 novi unique predmet istodobno na dvije lokacije: točno jedan', async () => {
-    const it1 = await A.repo.createItem({ name: 'Ljestve 2', kind: 'unique' });
+    // unique predmet ima već prvi smještaj (atomarno); dva korisnika istodobno pokušavaju DRUGI na različitim lokacijama
+    const it1 = await A.repo.createItemWithPlacement({
+      name: 'Ljestve 2',
+      kind: 'unique',
+      locationId: 'bedroom-top',
+    });
     const wait = barrier(2);
     A.hooks.afterReads = wait;
     B.hooks.afterReads = wait;
     const [ra, rb] = await Promise.all([
-      outcome(A.repo.addPlacement(it1.id, 'garage-tool')),
-      outcome(B.repo.addPlacement(it1.id, 'hall-cabinet')),
+      outcome(A.repo.addPlacement(it1.itemId, 'garage-tool')),
+      outcome(B.repo.addPlacement(it1.itemId, 'hall-cabinet')),
     ]);
-    expect([ra, rb].filter((r) => r === 'OK')).toHaveLength(1);
+    expect([ra, rb].filter((r) => r === 'OK')).toHaveLength(0); // unique već ima aktivan smještaj
+    expect([ra, rb]).toEqual(['ERR:duplicate-placement', 'ERR:duplicate-placement']);
   });
   it('isti smještaj premješten istodobno na dvije lokacije: jedan uspije, drugi changed-elsewhere', async () => {
     const wait = barrier(2);
@@ -448,7 +563,10 @@ describe('D5: opoziv članstva usred operacije ≠ konflikt', () => {
     ],
     ['renameLocation', (l) => l.repo.renameLocation('garage-box', 'x', 1)],
     ['moveLocation', (l) => l.repo.moveLocation('garage-box', 'living-tv')],
-    ['createItem', (l) => l.repo.createItem({ name: 'x', kind: 'type' })],
+    [
+      'createItemWithPlacement',
+      (l) => l.repo.createItemWithPlacement({ name: 'x', kind: 'type', locationId: 'garage-tool' }),
+    ],
     ['updateItem', (l) => l.repo.updateItem('hammer', { name: 'x' }, 1)],
     ['addPlacement', (l) => l.repo.addPlacement('battery', 'hall-cabinet')],
     ['movePlacement', (l) => l.repo.movePlacement('pl-battery-2', 'hall-cabinet', 1)],
@@ -472,6 +590,14 @@ describe('D5: opoziv članstva usred operacije ≠ konflikt', () => {
     });
     expect((await docData('locations/garage-box'))!.parentId).toBe('garage-shelf');
   });
+  it('REV-04: opoziv usred ATOMARNOG stvaranja predmeta => access-revoked i NIŠTA nije zapisano (ni Item, ni Placement, ni ključ)', async () => {
+    const before = { items: (await itemNames()).length, keys: (await keyIds()).length };
+    A.hooks.afterReads = async () => setEnabled(pa.uid, false);
+    await rejects(
+      A.repo.createItemWithPlacement({ name: 'Kasno', kind: 'type', locationId: 'garage-tool' }),
+    ).toMatchObject({ code: 'access-revoked' });
+    expect({ items: (await itemNames()).length, keys: (await keyIds()).length }).toEqual(before);
+  });
   it('opoziv ima prednost pred zastarjelom verzijom', async () => {
     await B.repo.updateItem('hammer', { name: 'B prvi' }, 1);
     await setEnabled(pa.uid, false);
@@ -487,8 +613,8 @@ describe('D5: opoziv članstva usred operacije ≠ konflikt', () => {
   });
   it('DomainError je pravi razred', async () => {
     await setEnabled(pa.uid, false);
-    await expect(A.repo.createItem({ name: 'x', kind: 'type' })).rejects.toBeInstanceOf(
-      DomainError,
-    );
+    await expect(
+      A.repo.createItemWithPlacement({ name: 'x', kind: 'type', locationId: 'garage-tool' }),
+    ).rejects.toBeInstanceOf(DomainError);
   });
 });

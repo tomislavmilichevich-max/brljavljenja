@@ -49,7 +49,7 @@ function mkRepo(): InventoryRepository {
     createLocation: vi.fn(async () => ({ id: 'new-loc' })),
     renameLocation: vi.fn(async () => {}),
     moveLocation: vi.fn(async () => {}),
-    createItem: vi.fn(async () => ({ id: 'new-item' })),
+    createItemWithPlacement: vi.fn(async () => ({ itemId: 'new-item', placementId: 'new-pl' })),
     updateItem: vi.fn(async () => {}),
     addPlacement: vi.fn(async () => ({ id: 'new-pl' })),
     movePlacement: vi.fn(async () => {}),
@@ -270,21 +270,20 @@ describe('InventoryPanel — online izmjene i status spremanja', () => {
     expect(opts).not.toContain('Kuća › Garaža');
     expect(opts).toContain('Kuća › Kuhinja › Gornji ormar › Kutija');
   });
-  it('novi predmet s lokacijom: createItem pa addPlacement; ako smještaj padne, poruka kaže da je predmet stvoren a smještaj NIJE', async () => {
+  it('novi predmet s lokacijom: JEDAN atomaran poziv createItemWithPlacement (nema zasebnog addPlacement)', async () => {
     const t = await setup();
     await t.push(ready);
-    (t.repo.addPlacement as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new DomainError('offline'),
-    );
     fireEvent.change(screen.getByLabelText('Naziv predmeta'), { target: { value: 'Ljestve' } });
     fireEvent.change(screen.getByLabelText('Početna lokacija'), { target: { value: 'garage' } });
     fireEvent.click(screen.getByRole('button', { name: 'Dodaj predmet' }));
     await waitFor(() =>
-      expect(screen.getByTestId('inv-status').textContent).toContain(
-        'Predmet je stvoren, ali smještaj NIJE spremljen',
-      ),
+      expect(t.repo.createItemWithPlacement).toHaveBeenCalledWith({
+        name: 'Ljestve',
+        kind: 'type',
+        locationId: 'garage',
+      }),
     );
-    expect(t.repo.createItem).toHaveBeenCalledWith({ name: 'Ljestve', kind: 'type' });
+    expect(t.repo.addPlacement).not.toHaveBeenCalled();
   });
 });
 
@@ -316,7 +315,7 @@ describe('InventoryPanel — Enter ne zaobilazi onemogućene izmjene', () => {
     });
     fireEvent.submit(screen.getByRole('form', { name: 'Nova lokacija' }));
     await act(async () => {});
-    expect(t.repo.createItem).not.toHaveBeenCalled();
+    expect(t.repo.createItemWithPlacement).not.toHaveBeenCalled();
     expect(t.repo.createLocation).not.toHaveBeenCalled();
     expect(screen.queryByTestId('inv-status')).toBeNull();
   });
@@ -366,5 +365,175 @@ describe('InventoryPanel — teardown i opoziv', () => {
     const onRevoked = vi.fn();
     render(<InventoryPanel port={port} onRevoked={onRevoked} />);
     await waitFor(() => expect(onRevoked).toHaveBeenCalled());
+  });
+});
+
+describe('P2B-REV-01: predmet se ne može stvoriti bez početne lokacije', () => {
+  it('bez odabrane lokacije gumb je onemogućen, a slanje obrasca (Enter) NE zove repozitorij i pokazuje jasnu poruku', async () => {
+    const t = await setup();
+    await t.push(ready);
+    fireEvent.change(screen.getByLabelText('Naziv predmeta'), {
+      target: { value: 'Bez lokacije' },
+    });
+    expect(
+      (screen.getByRole('button', { name: 'Dodaj predmet' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await act(async () => {});
+    expect(t.repo.createItemWithPlacement).not.toHaveBeenCalled();
+    expect(screen.getByTestId('item-form-error').textContent).toContain('početnu lokaciju');
+    expect((screen.getByLabelText('Naziv predmeta') as HTMLInputElement).value).toBe(
+      'Bez lokacije',
+    ); // unos ostaje
+  });
+  it('bez naziva (samo lokacija) također se ne šalje', async () => {
+    const t = await setup();
+    await t.push(ready);
+    fireEvent.change(screen.getByLabelText('Početna lokacija'), { target: { value: 'garage' } });
+    fireEvent.change(screen.getByLabelText('Naziv predmeta'), { target: { value: '   ' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'Novi predmet' }));
+    await act(async () => {});
+    expect(t.repo.createItemWithPlacement).not.toHaveBeenCalled();
+    expect(screen.getByTestId('item-form-error').textContent).toContain('Naziv');
+  });
+  it('lokacija je označena kao obavezna u obrascu (vidljiva napomena dok nije odabrana)', async () => {
+    const t = await setup();
+    await t.push(ready);
+    expect(screen.getByTestId('item-loc-hint').textContent).toContain('obavezna');
+    fireEvent.change(screen.getByLabelText('Početna lokacija'), { target: { value: 'garage' } });
+    expect(screen.queryByTestId('item-loc-hint')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Početna lokacija'), { target: { value: '' } });
+    const sel = screen.getByLabelText('Početna lokacija') as HTMLSelectElement;
+    expect(sel.required).toBe(true);
+    expect(sel.options[0]!.textContent).toContain('obavezno');
+    // više ne postoji opcija "bez lokacije"
+    expect([...sel.options].map((o) => o.textContent)).not.toContain('— bez lokacije —');
+  });
+});
+
+describe('P2B-REV-02: neuspjeh NE smije obrisati korisnikov unos', () => {
+  const fillItem = (name = 'Čuvaj me') => {
+    fireEvent.change(screen.getByLabelText('Naziv predmeta'), { target: { value: name } });
+    fireEvent.change(screen.getByLabelText('Početna lokacija'), { target: { value: 'garage' } });
+  };
+  const nameValue = () => (screen.getByLabelText('Naziv predmeta') as HTMLInputElement).value;
+  const submitItem = () => fireEvent.click(screen.getByRole('button', { name: 'Dodaj predmet' }));
+
+  for (const [label, err] of [
+    ['offline', new DomainError('offline')],
+    ['invalid-input', new DomainError('invalid-input', 'Naziv je predug.')],
+    ['outcome-unknown', new DomainError('outcome-unknown')],
+    ['changed-elsewhere', new DomainError('changed-elsewhere')],
+    ['nepoznata greška', new Error('INTERNAL')],
+  ] as const) {
+    it(`predmet: ${label} => naziv i odabrana lokacija ostaju u obrascu`, async () => {
+      const t = await setup();
+      await t.push(ready);
+      (t.repo.createItemWithPlacement as ReturnType<typeof vi.fn>).mockRejectedValueOnce(err);
+      fillItem();
+      submitItem();
+      await waitFor(() =>
+        expect(screen.getByTestId('inv-status').getAttribute('role')).toBe('alert'),
+      );
+      expect(nameValue()).toBe('Čuvaj me');
+      expect((screen.getByLabelText('Početna lokacija') as HTMLSelectElement).value).toBe('garage');
+    });
+  }
+  it('predmet: uspjeh briše naziv (i samo tada); lokacija ostaje za brzi unos sljedećeg', async () => {
+    const t = await setup();
+    await t.push(ready);
+    fillItem('Uspješan');
+    submitItem();
+    await waitFor(() => expect(nameValue()).toBe(''));
+    expect((screen.getByLabelText('Početna lokacija') as HTMLSelectElement).value).toBe('garage');
+  });
+  it('predmet: uspjeh s operacijom koja vraća ništa/undefined i dalje se prepoznaje kao uspjeh (nije greška)', async () => {
+    const t = await setup();
+    await t.push(ready);
+    (t.repo.createItemWithPlacement as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    fillItem('Vraća undefined');
+    submitItem();
+    await waitFor(() => expect(nameValue()).toBe(''));
+  });
+  it('predmet: nakon neuspjeha ponovni pokušaj s ISTIM unosom šalje isti zahtjev i tek tada briše', async () => {
+    const t = await setup();
+    await t.push(ready);
+    (t.repo.createItemWithPlacement as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new DomainError('offline'),
+    );
+    fillItem('Ponovi');
+    submitItem();
+    await waitFor(() =>
+      expect(screen.getByTestId('inv-status').textContent).toContain('NIJE spremljena'),
+    );
+    expect(nameValue()).toBe('Ponovi');
+    submitItem();
+    await waitFor(() => expect(nameValue()).toBe(''));
+    expect(t.repo.createItemWithPlacement).toHaveBeenCalledTimes(2);
+  });
+  for (const [label, err] of [
+    ['offline', new DomainError('offline')],
+    ['invalid-input', new DomainError('invalid-input', 'Naziv je predug.')],
+    ['bad-parent', new DomainError('bad-parent')],
+  ] as const) {
+    it(`lokacija: ${label} => upisani naziv ostaje`, async () => {
+      const t = await setup();
+      await t.push(ready);
+      (t.repo.createLocation as ReturnType<typeof vi.fn>).mockRejectedValueOnce(err);
+      fireEvent.change(screen.getByLabelText('Naziv lokacije'), {
+        target: { value: 'Moja polica' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Dodaj lokaciju' }));
+      await waitFor(() =>
+        expect(screen.getByTestId('inv-status').getAttribute('role')).toBe('alert'),
+      );
+      expect((screen.getByLabelText('Naziv lokacije') as HTMLInputElement).value).toBe(
+        'Moja polica',
+      );
+    });
+  }
+  it('lokacija: uspjeh briše naziv', async () => {
+    const t = await setup();
+    await t.push(ready);
+    fireEvent.change(screen.getByLabelText('Naziv lokacije'), { target: { value: 'Nova polica' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dodaj lokaciju' }));
+    await waitFor(() =>
+      expect((screen.getByLabelText('Naziv lokacije') as HTMLInputElement).value).toBe(''),
+    );
+  });
+  it('NEMA djelomičnog uspjeha: kad atomarna operacija padne, ne poziva se ni createItem ni addPlacement', async () => {
+    const t = await setup();
+    await t.push(ready);
+    (t.repo.createItemWithPlacement as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new DomainError('offline'),
+    );
+    fillItem();
+    submitItem();
+    await waitFor(() =>
+      expect(screen.getByTestId('inv-status').textContent).toContain('NIJE spremljena'),
+    );
+    expect(t.repo.addPlacement).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Predmet je stvoren, ali/)).toBeNull();
+  });
+});
+
+describe('P2B-REV-03: nedosljedni podaci nisu "prazno kućanstvo"', () => {
+  it('inconsistent: poruka s brojevima, bez ikakvih podataka, bez obrazaca i BEZ ponude "Pripremi kućanstvo"', async () => {
+    const t = await setup();
+    await t.push({ status: 'inconsistent', items: 3, placements: 2 });
+    expect(screen.getByTestId('inv-inconsistent').textContent).toContain('nedosljedni');
+    expect(screen.getByTestId('inv-inconsistent').textContent).toContain('3');
+    expect(screen.queryByRole('button', { name: /Pripremi kućanstvo/ })).toBeNull();
+    expect(screen.queryByLabelText('Naziv predmeta')).toBeNull();
+    expect(screen.queryByText('Kućanstvo još nema lokacija.')).toBeNull();
+  });
+  it('zaista prazno kućanstvo i dalje nudi pripremu (kontrola)', async () => {
+    const t = await setup();
+    await t.push({
+      status: 'ready',
+      data: { locations: [], items: [], placements: [] },
+      needsBootstrap: true,
+    });
+    expect(screen.getByText('Kućanstvo još nema lokacija.')).toBeTruthy();
   });
 });

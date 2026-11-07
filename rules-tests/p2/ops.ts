@@ -411,3 +411,45 @@ export function checkTreeIntegrity(locs: LocNode[], snapshot: { complete: boolea
   const problems = findTreeProblems(locs);
   return problems.length ? { status: 'corrupt', problems } : { status: 'ok' };
 }
+
+/** P2B-REV-04: Item + prvi Placement + placementKey u JEDNOJ transakciji (čita lokaciju prije pisanja). */
+export async function createItemWithPlacement(
+  db: Firestore,
+  uid: string,
+  d: { id: string; pl: string; name: string; kind: 'unique' | 'type'; locationId: string },
+  hooks: Hooks = {},
+) {
+  const h = once(hooks);
+  return explainDenied(db, () =>
+    runTransaction(db, async (tx) => {
+      const loc = await tx.get(ref(db, `locations/${d.locationId}`));
+      if (!loc.exists() || loc.data().archived) throw new DomainError('bad-location');
+      await h.afterReads?.();
+      const kid = keyIdFor(d.kind, d.id, d.locationId);
+      tx.set(ref(db, `items/${d.id}`), {
+        name: d.name,
+        kind: d.kind,
+        aliases: [],
+        category: null,
+        note: null,
+        version: 1,
+        archived: false,
+        ...stamp(uid),
+      });
+      tx.set(ref(db, `placements/${d.pl}`), {
+        itemId: d.id,
+        locationId: d.locationId,
+        version: 1,
+        archived: false,
+        ...stamp(uid),
+      });
+      tx.set(
+        ref(db, `placementKeys/${kid}`),
+        d.kind === 'unique'
+          ? { placementId: d.pl, itemId: d.id }
+          : { placementId: d.pl, itemId: d.id, locationId: d.locationId },
+      );
+      return { itemId: d.id, placementId: d.pl };
+    }),
+  );
+}
