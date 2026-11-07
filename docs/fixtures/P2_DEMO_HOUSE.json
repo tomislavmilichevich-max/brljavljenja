@@ -1,0 +1,779 @@
+{
+  "fixtureVersion": 1,
+  "fixtureOnly": true,
+  "householdId": "demo-house",
+  "firebaseProjectId": "demo-home-inventory-p2",
+  "warnings": [
+    "TEST DATA ONLY. Never import into home-inventory-pwa-218be/households/kuca1.",
+    "IDs and locations are invented. No real home/personal data.",
+    "No customer photos, quantities, or shopping entries in P2."
+  ],
+  "household": {
+    "name": "DEMO kuća",
+    "schemaVersion": 1
+  },
+  "locations": [
+    {
+      "id": "root",
+      "name": "Kuća",
+      "parentId": null,
+      "kind": "house",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "kitchen",
+      "name": "Kuhinja",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pantry",
+      "name": "Špajza",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "living",
+      "name": "Dnevni boravak",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "garage",
+      "name": "Garaža",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "bedroom",
+      "name": "Spavaća soba",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "bathroom",
+      "name": "Kupaonica",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "hall",
+      "name": "Hodnik",
+      "parentId": "root",
+      "kind": "room",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "kitchen-drawer",
+      "name": "Ladica 1",
+      "parentId": "kitchen",
+      "kind": "drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "kitchen-cabinet",
+      "name": "Gornji ormar",
+      "parentId": "kitchen",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pantry-shelf",
+      "name": "Polica 1",
+      "parentId": "pantry",
+      "kind": "shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pantry-box",
+      "name": "Kutija začina",
+      "parentId": "pantry-shelf",
+      "kind": "box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "living-tv",
+      "name": "TV ormarić",
+      "parentId": "living",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "living-drawer",
+      "name": "Ladica 1",
+      "parentId": "living-tv",
+      "kind": "drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "garage-rack",
+      "name": "Regal A",
+      "parentId": "garage",
+      "kind": "shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "garage-shelf",
+      "name": "Polica 2",
+      "parentId": "garage-rack",
+      "kind": "shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "garage-box",
+      "name": "Kutija B",
+      "parentId": "garage-shelf",
+      "kind": "box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "garage-tool",
+      "name": "Ormar s alatom",
+      "parentId": "garage",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "bedroom-wardrobe",
+      "name": "Ormar",
+      "parentId": "bedroom",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "bedroom-top",
+      "name": "Gornja polica",
+      "parentId": "bedroom-wardrobe",
+      "kind": "shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "bathroom-cabinet",
+      "name": "Ormarić",
+      "parentId": "bathroom",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "hall-cabinet",
+      "name": "Komoda",
+      "parentId": "hall",
+      "kind": "cabinet",
+      "version": 1,
+      "archived": false
+    }
+  ],
+  "items": [
+    {
+      "id": "aku-drill",
+      "name": "Aku bušilica",
+      "kind": "unique",
+      "aliases": [
+        "busilica"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "hex-keys",
+      "name": "Set imbus ključeva",
+      "kind": "unique",
+      "aliases": [
+        "inbus",
+        "hex"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "hammer",
+      "name": "Čekić",
+      "kind": "unique",
+      "aliases": [
+        "cekic"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "extension",
+      "name": "Produžni kabel 5 m",
+      "kind": "unique",
+      "aliases": [
+        "kabel"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "battery",
+      "name": "AA baterije",
+      "kind": "type",
+      "aliases": [
+        "baterija",
+        "AA"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "usb-cable",
+      "name": "USB-C kabel",
+      "kind": "type",
+      "aliases": [
+        "punjač kabel"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "hdmi",
+      "name": "HDMI kabel",
+      "kind": "type",
+      "aliases": [
+        "hdmi"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "holiday",
+      "name": "Božićni ukrasi",
+      "kind": "type",
+      "aliases": [
+        "ukrasi"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "screwdriver",
+      "name": "Križni odvijač",
+      "kind": "unique",
+      "aliases": [
+        "šarafciger"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "tape",
+      "name": "Izolir traka",
+      "kind": "type",
+      "aliases": [
+        "traka"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "ruler",
+      "name": "Metar 3 m",
+      "kind": "unique",
+      "aliases": [
+        "metar"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "lamp",
+      "name": "Rezervna žarulja",
+      "kind": "type",
+      "aliases": [
+        "zarulja"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "spices",
+      "name": "Mljevena paprika",
+      "kind": "type",
+      "aliases": [
+        "paprika"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "salt",
+      "name": "Sol",
+      "kind": "type",
+      "aliases": [
+        "sol"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "rice",
+      "name": "Riža",
+      "kind": "type",
+      "aliases": [
+        "riza"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pasta",
+      "name": "Tjestenina",
+      "kind": "type",
+      "aliases": [
+        "pasta"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "oil",
+      "name": "Maslinovo ulje",
+      "kind": "type",
+      "aliases": [
+        "ulje"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "scissors",
+      "name": "Škare",
+      "kind": "unique",
+      "aliases": [
+        "skare"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "opener",
+      "name": "Otvarač za konzerve",
+      "kind": "unique",
+      "aliases": [
+        "otvarac"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "spatula",
+      "name": "Lopatica",
+      "kind": "unique",
+      "aliases": [
+        "špatula"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "remote",
+      "name": "TV daljinski upravljač",
+      "kind": "unique",
+      "aliases": [
+        "daljinski"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "charger",
+      "name": "USB punjač",
+      "kind": "type",
+      "aliases": [
+        "punjač"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "toothpaste",
+      "name": "Pasta za zube",
+      "kind": "type",
+      "aliases": [
+        "pasta zubi"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "shampoo",
+      "name": "Šampon",
+      "kind": "type",
+      "aliases": [
+        "sampon"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "keys",
+      "name": "Rezervni ključevi",
+      "kind": "unique",
+      "aliases": [
+        "ključevi"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "flowers",
+      "name": "Đurđevak ukras",
+      "kind": "unique",
+      "aliases": [
+        "durdevak",
+        "durdjevak"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pillow",
+      "name": "Rezervni jastuk",
+      "kind": "unique",
+      "aliases": [
+        "jastuk"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "broom",
+      "name": "Metla",
+      "kind": "unique",
+      "aliases": [
+        "metla"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "adapter",
+      "name": "USB adapter",
+      "kind": "type",
+      "aliases": [
+        "adapter"
+      ],
+      "category": null,
+      "note": null,
+      "version": 1,
+      "archived": false
+    }
+  ],
+  "placements": [
+    {
+      "id": "pl-aku-drill-1",
+      "itemId": "aku-drill",
+      "locationId": "garage-tool",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-hex-keys-1",
+      "itemId": "hex-keys",
+      "locationId": "garage-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-hammer-1",
+      "itemId": "hammer",
+      "locationId": "garage-tool",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-extension-1",
+      "itemId": "extension",
+      "locationId": "garage-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-battery-1",
+      "itemId": "battery",
+      "locationId": "living-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-usb-cable-1",
+      "itemId": "usb-cable",
+      "locationId": "living-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-hdmi-1",
+      "itemId": "hdmi",
+      "locationId": "living-tv",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-holiday-1",
+      "itemId": "holiday",
+      "locationId": "bedroom-top",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-screwdriver-1",
+      "itemId": "screwdriver",
+      "locationId": "garage-tool",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-tape-1",
+      "itemId": "tape",
+      "locationId": "garage-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-ruler-1",
+      "itemId": "ruler",
+      "locationId": "garage-tool",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-lamp-1",
+      "itemId": "lamp",
+      "locationId": "hall-cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-spices-1",
+      "itemId": "spices",
+      "locationId": "pantry-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-salt-1",
+      "itemId": "salt",
+      "locationId": "pantry-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-rice-1",
+      "itemId": "rice",
+      "locationId": "pantry-shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-pasta-1",
+      "itemId": "pasta",
+      "locationId": "pantry-shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-oil-1",
+      "itemId": "oil",
+      "locationId": "pantry-shelf",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-scissors-1",
+      "itemId": "scissors",
+      "locationId": "kitchen-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-opener-1",
+      "itemId": "opener",
+      "locationId": "kitchen-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-spatula-1",
+      "itemId": "spatula",
+      "locationId": "kitchen-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-remote-1",
+      "itemId": "remote",
+      "locationId": "living-tv",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-charger-1",
+      "itemId": "charger",
+      "locationId": "living-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-toothpaste-1",
+      "itemId": "toothpaste",
+      "locationId": "bathroom-cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-shampoo-1",
+      "itemId": "shampoo",
+      "locationId": "bathroom-cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-keys-1",
+      "itemId": "keys",
+      "locationId": "hall-cabinet",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-flowers-1",
+      "itemId": "flowers",
+      "locationId": "living-tv",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-pillow-1",
+      "itemId": "pillow",
+      "locationId": "bedroom-top",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-broom-1",
+      "itemId": "broom",
+      "locationId": "hall",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-adapter-1",
+      "itemId": "adapter",
+      "locationId": "living-drawer",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-battery-2",
+      "itemId": "battery",
+      "locationId": "garage-box",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-usb-cable-2",
+      "itemId": "usb-cable",
+      "locationId": "bedroom-top",
+      "version": 1,
+      "archived": false
+    },
+    {
+      "id": "pl-charger-2",
+      "itemId": "charger",
+      "locationId": "kitchen-cabinet",
+      "version": 1,
+      "archived": false
+    }
+  ],
+  "testScenarios": [
+    "Premjesti garage-box pod living-tv i vrati putem zasebne transakcije",
+    "Pokušaj garage-rack staviti pod garage-box: odbiti ciklus",
+    "Pretraži 'aku busilca', 'durdevak', 'AA baterije', 'spajza'",
+    "Premjesti samo pl-battery-2, prvi Placement baterija ostaje",
+    "Pokušaj dvaput smjestiti isti item u living-drawer: odbiti duplikat"
+  ]
+}
