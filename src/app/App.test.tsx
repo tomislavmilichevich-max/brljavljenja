@@ -17,7 +17,16 @@ function fake(access: AccessResult | (() => Promise<AccessResult>)) {
     signOut: vi.fn(async () => onUser(null)),
   };
   const checkAccess = vi.fn(async () => (typeof access === 'function' ? access() : access));
-  const services: Services = { auth, access: { checkAccess } };
+  // Inventar nije predmet ovih testova: sesija koja se nikad ne javlja (ostaje "Učitavanje inventara…").
+  const data = {
+    open: vi.fn(async () => ({
+      uid: 'x',
+      repo: {} as never,
+      watch: () => () => {},
+      dispose: async () => {},
+    })),
+  };
+  const services: Services = { auth, access: { checkAccess }, data };
   return {
     services,
     emitUser: (u: SessionUser | null) => act(() => onUser(u)),

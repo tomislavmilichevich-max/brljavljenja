@@ -3,6 +3,7 @@ import { readFirebaseConfig } from '../config/env';
 import type { Services } from '../auth/types';
 import { useSession } from '../auth/useSession';
 import { createFirebaseServices } from '../firebase/client';
+import { InventoryPanel } from './InventoryPanel';
 import {
   AccessError,
   CheckingAccess,
@@ -31,7 +32,7 @@ function defaultServices(): { services: Services } | { missing: string[] } {
 }
 
 function Session({ services }: { services: Services }) {
-  const { state, signIn, signOut, recheck, signOutFailed } = useSession(services);
+  const { state, signIn, signOut, recheck, revoke, signOutFailed } = useSession(services);
   switch (state.phase) {
     case 'initializing':
       return <Initializing />;
@@ -41,15 +42,19 @@ function Session({ services }: { services: Services }) {
       return <CheckingAccess />;
     case 'member':
       return (
-        <Member
-          householdName={state.householdName}
-          displayName={state.user.displayName}
-          verifiedAt={state.verifiedAt}
-          stale={state.stale}
-          onRecheck={recheck}
-          onSignOut={signOut}
-          signOutFailed={signOutFailed}
-        />
+        <>
+          <Member
+            householdName={state.householdName}
+            displayName={state.user.displayName}
+            verifiedAt={state.verifiedAt}
+            stale={state.stale}
+            onRecheck={recheck}
+            onSignOut={signOut}
+            signOutFailed={signOutFailed}
+          />
+          {/* key=uid: promjena računa ODMAH uništava staru podatkovnu sesiju (listeneri + keš) i otvara novu */}
+          <InventoryPanel key={state.user.uid} port={services.data} onRevoked={revoke} />
+        </>
       );
     case 'denied':
       return <Denied uid={state.user.uid} onRecheck={recheck} onSignOut={signOut} />;

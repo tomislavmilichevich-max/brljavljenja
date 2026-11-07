@@ -81,7 +81,6 @@ export function Member(props: {
           Pristup potvrđen sa servera u {formatTime(props.verifiedAt)}.
         </p>
       )}
-      <p>Inventar još nije implementiran (P2).</p>
       {props.signOutFailed && <p role="alert">Odjava nije uspjela. Pokušaj ponovno.</p>}
       <p>
         <button type="button" onClick={props.onRecheck}>
