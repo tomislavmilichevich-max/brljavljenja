@@ -398,15 +398,37 @@ describe('Item: kind, arhiviranje, MD-18 (jedinstveni predmet)', () => {
     await assertSucceeds(renameItem(as(env, UID_A), UID_A, 'battery', 'AA baterije (kutija)', 1));
     expect(JSON.stringify(await placementOf('pl-battery-1'))).toBe(before);
   });
-  it('MD-18 jedinstveni predmet SA smještajem se ne može arhivirati (server); bez smještaja može', async () => {
+  it('D2: arhiviranje predmeta je ZABRANJENO na serveru (unique i type, sa i bez smještaja); archived se ne može promijeniti ni natrag', async () => {
     const db = as(env, UID_A);
-    await assertFails(archiveItem(db, UID_A, 'aku-drill', 1));
+    await assertFails(archiveItem(db, UID_A, 'aku-drill', 1)); // unique sa smještajem
+    await assertFails(archiveItem(db, UID_A, 'battery', 1)); // type sa smještajima
     await archivePlacement(db, UID_A, 'pl-aku-drill-1', 1);
-    await assertSucceeds(archiveItem(db, UID_A, 'aku-drill', 1));
-  });
-  it('MD-18 ZNANO OGRANIČENJE: type predmet sa smještajima server NE sprječava arhivirati (zaštita je u klijentu) — ADR R-3', async () => {
-    await assertSucceeds(archiveItem(as(env, UID_A), UID_A, 'battery', 1));
-    expect((await placementOf('pl-battery-1'))!.archived).toBe(false); // smještaj ostaje aktivan => klijent mora blokirati prije
+    await assertFails(archiveItem(db, UID_A, 'aku-drill', 1)); // unique BEZ smještaja — i dalje zabranjeno
+    await assertFails(
+      updateDoc(I(db, 'hammer'), {
+        archived: true,
+        version: 2,
+        updatedAt: serverTimestamp(),
+        updatedBy: UID_A,
+      }),
+    );
+    // arhiviran od strane admina (npr. ručni zahvat): klijent ga ne može vratiti
+    await env.withSecurityRulesDisabled(
+      async (c) =>
+        void (await updateDoc(doc(c.firestore(), `households/${H}/items/hex-keys`), {
+          archived: true,
+        })),
+    );
+    await assertFails(
+      updateDoc(I(db, 'hex-keys'), {
+        archived: false,
+        version: 2,
+        updatedAt: serverTimestamp(),
+        updatedBy: UID_A,
+      }),
+    );
+    // uređivanje naziva i dalje radi
+    await assertSucceeds(renameItem(db, UID_A, 'battery', 'AA baterije', 1));
   });
   it('keyIdFor pomoćnik je u skladu s pravilima', () => {
     expect(keyIdFor('unique', 'a', 'b')).toBe('a__unique');

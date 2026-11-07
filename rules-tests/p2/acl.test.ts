@@ -143,10 +143,13 @@ describe('ACL-24/25/26 nečlan, onemogućeni, član drugog kućanstva', () => {
       );
       await assertFails(updateDoc(D(db, 'meta/tree'), { rev: 1 }));
       await assertFails(deleteDoc(D(db, 'placementKeys/hammer__unique')));
-      await assertFails(
+      // referentni protokol (D5): nečlan/opozvani dobiva access-revoked, a ne sukob
+      await expect(
         addPlacement(db, uid, { id: 'pl-ghost', itemId: 'hammer', locationId: 'garage-box' }),
-      );
-      await assertFails(moveLocation(db, uid, 'garage-box', 'living-tv'));
+      ).rejects.toMatchObject({ code: 'access-revoked' });
+      await expect(moveLocation(db, uid, 'garage-box', 'living-tv')).rejects.toMatchObject({
+        code: 'access-revoked',
+      });
     });
   }
   it('ACL-26 član drugog kućanstva ne može ni "kopirati" tuđe dokumente u svoje (reference su ograničene na isto kućanstvo)', async () => {
@@ -172,7 +175,9 @@ describe('ACL-24/25/26 nečlan, onemogućeni, član drugog kućanstva', () => {
         })),
     );
     await assertFails(getDoc(D(as(env, UID_A), 'items/hammer')));
-    await assertFails(renameItem(as(env, UID_A), UID_A, 'hammer', 'x', 1));
+    await expect(renameItem(as(env, UID_A), UID_A, 'hammer', 'x', 1)).rejects.toMatchObject({
+      code: 'access-revoked',
+    });
     await assertFails(getDocs(C(as(env, UID_A), 'locations')));
     await assertSucceeds(renameItem(as(env, UID_B), UID_B, 'hammer', 'Čekić B', 1));
   });
@@ -413,6 +418,76 @@ describe('ACL-31 testovi imaju zube: namjerno pokvarena pravila MORAJU oboriti s
           'allow get, write: if isActiveMember(householdId);',
         ),
       probe: (e) => updateDoc(D(as(e, UID_A), `members/${UID_A}`), { role: 'owner' }),
+    },
+    {
+      name: 'M11 Location.kind se smije mijenjati',
+      mutate: (r) =>
+        r.replace(/(function validLocationUpdate[\s\S]*?)&& n\.kind == o\.kind\s*\n/, '$1'),
+      probe: (e) =>
+        updateDoc(D(as(e, UID_A), 'locations/garage-box'), {
+          kind: 'shelf',
+          version: 2,
+          updatedAt: serverTimestamp(),
+          updatedBy: UID_A,
+        }),
+    },
+    {
+      name: 'M12 prostorije se smiju premještati',
+      mutate: (r) => r.replace("o.kind != 'room' && ", ''),
+      probe: (e) => rawReparent(e, 'kitchen', 'living'),
+    },
+    {
+      name: 'M13 Location se smije arhivirati',
+      mutate: (r) =>
+        r.replace(/(function validLocationUpdate[\s\S]*?)\n\s*&& n\.archived == o\.archived/, '$1'),
+      probe: (e) =>
+        updateDoc(D(as(e, UID_A), 'locations/garage-box'), {
+          archived: true,
+          version: 2,
+          updatedAt: serverTimestamp(),
+          updatedBy: UID_A,
+        }),
+    },
+    {
+      name: 'M14 Item se smije arhivirati',
+      mutate: (r) =>
+        r.replace(
+          /(function validItemUpdate[\s\S]*?&& n\.kind == o\.kind)\s*\n\s*&& n\.archived == o\.archived;/,
+          '$1;',
+        ),
+      probe: (e) =>
+        updateDoc(D(as(e, UID_A), 'items/hammer'), {
+          archived: true,
+          version: 2,
+          updatedAt: serverTimestamp(),
+          updatedBy: UID_A,
+        }),
+    },
+    {
+      name: 'M15 kind=house smije imati i ne-root lokacija',
+      mutate: (r) => r.replace("d.kind != 'house' && validId(d.parentId)", 'validId(d.parentId)'),
+      probe: (e) =>
+        createLocation(as(e, UID_A), UID_A, {
+          id: 'house2',
+          name: 'Druga',
+          parentId: 'root',
+          kind: 'house',
+        }),
+    },
+    {
+      name: 'M16 root smije biti drugog kinda od house',
+      mutate: (r) => r.replace("(d.parentId == null && d.kind == 'house')", 'd.parentId == null'),
+      probe: async (e) => {
+        await e.withSecurityRulesDisabled(
+          async (c) => void (await deleteDoc(doc(c.firestore(), `households/${H}/locations/root`))),
+        );
+        return setDoc(D(as(e, UID_A), 'locations/root'), {
+          name: 'Kuća',
+          parentId: null,
+          kind: 'room',
+          ...audit(UID_A),
+        });
+      },
     },
   ];
 

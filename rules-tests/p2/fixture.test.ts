@@ -29,6 +29,14 @@ describe('P2_DEMO_HOUSE.json', () => {
     }
     for (const [id, c] of perItem) if (items.get(id)!.kind === 'unique') expect(c, id).toBe(1);
   });
+  it('usklađen s pravilima kinda: samo root je "house", root je "house", prostorije su djeca roota, nitko nije arhiviran', () => {
+    const houses = fixture.locations.filter((l) => l.kind === 'house');
+    expect(houses.map((l) => l.id)).toEqual(['root']);
+    for (const l of fixture.locations.filter((x) => x.kind === 'room'))
+      expect(l.parentId, l.id).toBe('root');
+    expect(fixture.locations.some((l) => l.archived)).toBe(false);
+    expect(fixture.items.some((i) => i.archived)).toBe(false);
+  });
   it('svi ID-ovi zadovoljavaju format koji traže pravila (mala slova, brojke, crtice; bez "_")', () => {
     const all = [...fixture.locations, ...fixture.items, ...fixture.placements].map((x) => x.id);
     for (const id of all) expect(id).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);

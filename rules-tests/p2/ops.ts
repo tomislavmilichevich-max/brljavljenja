@@ -6,6 +6,7 @@ import {
   collection,
   doc,
   getDoc,
+  getDocFromServer,
   getDocs,
   runTransaction,
   serverTimestamp,
@@ -39,18 +40,31 @@ const touch = (uid: string, version: number) => ({
 });
 
 /**
- * Ako upis padne s permission-denied, ponovno pročitaj stanje: ako se zapis stvarno promijenio, to je sukob
- * ("changed-elsewhere"/"duplicate-placement"), a ne nedostatak ovlasti. Pravo odbijanje (npr. opozvan član) ostaje
- * 'permission-denied' jer ponovno čitanje ne pokazuje promjenu (ili je i samo odbijeno).
+ * D5: opoziv članstva MORA se razlikovati od sukoba. Pri svakom permission-denied najprije provjeri pristup
+ * kućanstvu S POSLUŽITELJA (nikad iz keša): ako je i taj `get` odbijen, korisnik više nije aktivan član =>
+ * 'access-revoked' (UI: odmah ukloniti podatke i pretplate, NE nuditi "pokušaj ponovno").
+ * Ako pristup postoji, a upis je ipak odbijen, ponovno pročitaj zapis: promjena verzije/ključa znači sukob
+ * ('changed-elsewhere'/'duplicate-placement'). Bez mreže ('unavailable') ne tvrdimo ništa o opozivu.
  */
+export async function accessRevoked(db: Firestore): Promise<boolean> {
+  try {
+    await getDocFromServer(doc(db, `households/${H}`));
+    return false;
+  } catch (e) {
+    return isDenied(e);
+  }
+}
+
 async function explainDenied<T>(
+  db: Firestore,
   fn: () => Promise<T>,
-  recheck: () => Promise<DomainError | null>,
+  recheck: () => Promise<DomainError | null> = async () => null,
 ): Promise<T> {
   try {
     return await fn();
   } catch (e) {
     if (isDenied(e)) {
+      if (await accessRevoked(db)) throw new DomainError('access-revoked');
       const reason = await recheck().catch(() => null);
       if (reason) throw reason;
     }
@@ -93,6 +107,7 @@ export async function moveLocation(
         usedRev = tree.data()!.rev;
         const loc = await tx.get(ref(db, `locations/${id}`));
         if (!loc.exists()) throw new DomainError('not-found');
+        if (loc.data().kind === 'room') throw new DomainError('room-immovable');
         if (loc.data().parentId === newParentId) throw new DomainError('same-parent');
         let cur: string | null = newParentId;
         const seen = new Set<string>();
@@ -113,9 +128,12 @@ export async function moveLocation(
         tx.update(treeRef, { rev: usedRev + 1 });
       });
     } catch (e) {
-      if (isDenied(e) && attempt < 3) {
-        const now = (await getDoc(ref(db, 'meta/tree'))).data()?.rev;
-        if (now !== usedRev) continue; // stablo se promijenilo => ponovi s novim stanjem
+      if (isDenied(e)) {
+        if (await accessRevoked(db)) throw new DomainError('access-revoked');
+        if (attempt < 3) {
+          const now = (await getDocFromServer(ref(db, 'meta/tree'))).data()?.rev;
+          if (now !== usedRev) continue; // stablo se promijenilo => ponovi s novim stanjem
+        }
       }
       throw e;
     }
@@ -127,24 +145,27 @@ export async function createLocation(
   uid: string,
   d: { id: string; name: string; parentId: string; kind: string },
 ) {
-  return runTransaction(db, async (tx) => {
-    const parent = await tx.get(ref(db, `locations/${d.parentId}`));
-    if (!parent.exists() || parent.data().archived) throw new DomainError('bad-parent');
-    tx.set(ref(db, `locations/${d.id}`), {
-      name: d.name,
-      parentId: d.parentId,
-      kind: d.kind,
-      version: 1,
-      archived: false,
-      ...stamp(uid),
-    });
-  });
+  return explainDenied(db, () =>
+    runTransaction(db, async (tx) => {
+      const parent = await tx.get(ref(db, `locations/${d.parentId}`));
+      if (!parent.exists() || parent.data().archived) throw new DomainError('bad-parent');
+      tx.set(ref(db, `locations/${d.id}`), {
+        name: d.name,
+        parentId: d.parentId,
+        kind: d.kind,
+        version: 1,
+        archived: false,
+        ...stamp(uid),
+      });
+    }),
+  );
 }
 
 // ---------------------------------------------------------------- smještaji
 export async function addPlacement(db: Firestore, uid: string, d: Ids, hooks: Hooks = {}) {
   const h = once(hooks);
   return explainDenied(
+    db,
     () =>
       runTransaction(db, async (tx) => {
         const item = await tx.get(ref(db, `items/${d.itemId}`));
@@ -190,6 +211,7 @@ export async function movePlacement(
 ) {
   const h = once(hooks);
   return explainDenied(
+    db,
     () =>
       runTransaction(db, async (tx) => {
         const pl = await tx.get(ref(db, `placements/${id}`));
@@ -237,18 +259,22 @@ export async function archivePlacement(
   id: string,
   expectedVersion: number,
 ) {
-  return runTransaction(db, async (tx) => {
-    const pl = await tx.get(ref(db, `placements/${id}`));
-    if (!pl.exists() || pl.data().archived) throw new DomainError('not-found');
-    if (pl.data().version !== expectedVersion) throw new DomainError('changed-elsewhere');
-    const item = await tx.get(ref(db, `items/${pl.data().itemId}`));
-    const kind = item.data()!.kind as 'unique' | 'type';
-    tx.update(ref(db, `placements/${id}`), { archived: true, ...touch(uid, pl.data().version) });
-    tx.delete(ref(db, `placementKeys/${keyIdFor(kind, pl.data().itemId, pl.data().locationId)}`));
-  });
+  return explainDenied(db, () =>
+    runTransaction(db, async (tx) => {
+      const pl = await tx.get(ref(db, `placements/${id}`));
+      if (!pl.exists() || pl.data().archived) throw new DomainError('not-found');
+      if (pl.data().version !== expectedVersion) throw new DomainError('changed-elsewhere');
+      const item = await tx.get(ref(db, `items/${pl.data().itemId}`));
+      const kind = item.data()!.kind as 'unique' | 'type';
+      tx.update(ref(db, `placements/${id}`), { archived: true, ...touch(uid, pl.data().version) });
+      tx.delete(ref(db, `placementKeys/${keyIdFor(kind, pl.data().itemId, pl.data().locationId)}`));
+    }),
+  );
 }
 
 // ---------------------------------------------------------------- predmeti
+// NAPOMENA (D2): arhiviranje Itema/Locationa je zabranjeno u pravilima; `archiveItem` postoji samo da testovi
+// dokažu odbijanje.
 export async function renameItem(
   db: Firestore,
   uid: string,
@@ -259,6 +285,7 @@ export async function renameItem(
 ) {
   const h = once(hooks);
   return explainDenied(
+    db,
     () =>
       runTransaction(db, async (tx) => {
         const it = await tx.get(ref(db, `items/${id}`));
@@ -281,27 +308,31 @@ export async function createItem(
   uid: string,
   d: { id: string; name: string; kind: 'unique' | 'type' },
 ) {
-  return runTransaction(db, async (tx) => {
-    tx.set(ref(db, `items/${d.id}`), {
-      name: d.name,
-      kind: d.kind,
-      aliases: [],
-      category: null,
-      note: null,
-      version: 1,
-      archived: false,
-      ...stamp(uid),
-    });
-  });
+  return explainDenied(db, () =>
+    runTransaction(db, async (tx) => {
+      tx.set(ref(db, `items/${d.id}`), {
+        name: d.name,
+        kind: d.kind,
+        aliases: [],
+        category: null,
+        note: null,
+        version: 1,
+        archived: false,
+        ...stamp(uid),
+      });
+    }),
+  );
 }
 
 export async function archiveItem(db: Firestore, uid: string, id: string, expectedVersion: number) {
-  return runTransaction(db, async (tx) => {
-    const it = await tx.get(ref(db, `items/${id}`));
-    if (!it.exists()) throw new DomainError('not-found');
-    if (it.data().version !== expectedVersion) throw new DomainError('changed-elsewhere');
-    tx.update(ref(db, `items/${id}`), { archived: true, ...touch(uid, it.data().version) });
-  });
+  return explainDenied(db, () =>
+    runTransaction(db, async (tx) => {
+      const it = await tx.get(ref(db, `items/${id}`));
+      if (!it.exists()) throw new DomainError('not-found');
+      if (it.data().version !== expectedVersion) throw new DomainError('changed-elsewhere');
+      tx.update(ref(db, `items/${id}`), { archived: true, ...touch(uid, it.data().version) });
+    }),
+  );
 }
 
 /** Čitanje svih smještaja (za testove stanja). */
@@ -311,4 +342,54 @@ export async function listPlacements(db: Firestore) {
     id: d.id,
     ...(d.data() as { itemId: string; locationId: string; archived: boolean; version: number }),
   }));
+}
+
+// ---------------------------------------------------------------- integritet stabla (D1)
+export interface LocNode {
+  id: string;
+  parentId: string | null;
+}
+export type TreeProblem =
+  | { type: 'no-root' }
+  | { type: 'extra-root'; ids: string[] }
+  | { type: 'missing-parent'; id: string; parentId: string }
+  | { type: 'cycle'; ids: string[] };
+
+/**
+ * D1: detekcija OŠTEĆENOG stabla nakon učitavanja (Rules ne jamče potpunu acikličnost). Čista funkcija, O(n),
+ * bez ograničenja dubine. P2-B ju MORA pozvati nakon svakog učitavanja/snapshota lokacija; ako vrati ijedan
+ * problem, UI ne smije prikazivati putanje niti dopuštati premještanja (prikaz greške + upute vlasniku).
+ * Root je iznimno lokacija s ID-em 'root' i parentId == null.
+ */
+export function findTreeProblems(locs: LocNode[]): TreeProblem[] {
+  const problems: TreeProblem[] = [];
+  const byId = new Map(locs.map((l) => [l.id, l]));
+  const roots = locs.filter((l) => l.parentId === null).map((l) => l.id);
+  if (!byId.has('root') || byId.get('root')!.parentId !== null) problems.push({ type: 'no-root' });
+  const extra = roots.filter((id) => id !== 'root');
+  if (extra.length) problems.push({ type: 'extra-root', ids: extra });
+  for (const l of locs) {
+    if (l.parentId !== null && !byId.has(l.parentId))
+      problems.push({ type: 'missing-parent', id: l.id, parentId: l.parentId });
+  }
+  // ciklusi: 0 = neviđeno, 1 = na tekućem putu, 2 = gotovo (iterativno, bez rekurzije => radi za proizvoljnu dubinu)
+  const state = new Map<string, 1 | 2>();
+  for (const start of locs) {
+    if (state.get(start.id) === 2) continue;
+    const path: string[] = [];
+    let cur: string | null = start.id;
+    while (cur !== null && byId.has(cur)) {
+      const st = state.get(cur);
+      if (st === 2) break;
+      if (st === 1) {
+        problems.push({ type: 'cycle', ids: path.slice(path.indexOf(cur)) });
+        break;
+      }
+      state.set(cur, 1);
+      path.push(cur);
+      cur = byId.get(cur)!.parentId;
+    }
+    for (const id of path) state.set(id, 2);
+  }
+  return problems;
 }

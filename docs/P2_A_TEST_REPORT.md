@@ -1,9 +1,9 @@
 # P2_A_TEST_REPORT — model Location + Item + Placement, pravila i testovi
 
 Datum: 2026-11-07 · Grana: `p2a/data-model-rules` (razvijana na dokumentacijskoj grani PR #6; nakon njegova spajanja `main` je spojen u granu, diff prema `main` sadrži samo P2-A datoteke) · Okruženje: Claude Code cloud (Linux, Node 22.23.4, Java 21, firebase-tools 15.35.0, firebase 13.2.0)
-Testirana pravila: `firestore.rules`, **sha256 `b998f2269754`**, 216 linija. Statusi: **PASS** · **PARTIAL** (djelomično, objašnjeno) · **FAIL** · **BLOCKED** · **NOT VERIFIED** · **NOT STARTED**.
+Testirana pravila (revizija 2): `firestore.rules`, **sha256 `c141f0dda1dd`**. Prethodna verzija (PR #7): `b998f2269754`. Statusi: **PASS** · **PARTIAL** (djelomično, objašnjeno) · **FAIL** · **BLOCKED** · **NOT VERIFIED** · **NOT STARTED**.
 
-**Ukupni status P2-A: PARTIAL — pravila i dokazi su gotovi; jedna stroga invarijanta (potpuna acikličnost bez ograničenja dubine) NIJE izvediva samo s Rules i čeka odluku glavnog razvoja (D1 u `docs/P2_A_ADR.md`).** Ništa nije deployano. U produkcijsko `households/kuca1` ništa nije upisano. Demo kuća koristi se isključivo u izoliranim emulatorima (`demo-…` projekti).
+**Ukupni status P2-A: ODOBRENO UZ UVJETE (odluke D1–D5 glavnog razvoja). Revizija 2 (ovaj PR) provodi korekcije; vidi §7.** Potpuna acikličnost nije zajamčena Rules-ima (D1) — ograničena serverska provjera + obvezni protokol i detekcija u P2-B. Ništa nije deployano; u produkcijsko `households/kuca1` ništa nije upisano.
 
 ## 1. Naredbe i stvarni izlazi
 
@@ -14,36 +14,36 @@ Testirana pravila: `firestore.rules`, **sha256 `b998f2269754`**, 216 linija. Sta
 | `npm run build`                                                       | PASS (JS 770.6 kB, gzip 235.3 kB — nepromijenjeno)                         |
 | `npm run check:no-actions`                                            | PASS                                                                       |
 | `npm run guard:rules`                                                 | PASS (`b998f2269754`)                                                      |
-| `npm run test:rules` (Firestore emulator)                             | **PASS — 9 datoteka, 147 testova, 0 palih**                                |
+| `npm run test:rules` (Firestore emulator)                             | **PASS — 10 datoteka, 187 testova, 0 palih** (revizija 2)                  |
 | `npm run test:e2e` (P1 regresija, Auth+Firestore emulatori, Chromium) | **PASS 14/14**                                                             |
 
-Rules testovi po datoteci: `firestore.rules.test.ts` 36 (P1, jedan blok prilagođen) · `p2/acl` 29 · `p2/concurrency` 13 · `p2/depth` 4 · `p2/fixture` 6 · `p2/hierarchy` 24 · `p2/offline` 3 · `p2/placements` 26 · `p2/platform-limits` 6.
+Rules testovi po datoteci (revizija 2): `firestore.rules.test.ts` 36 · `p2/acl` 35 · `p2/concurrency` 13 · `p2/depth` 16 · `p2/fixture` 7 · `p2/hierarchy` 32 · `p2/offline` 3 · `p2/placements` 25 · `p2/platform-limits` 6 · `p2/revocation` 14.
 Stabilnost: `test:rules` pokrenut 3× zaredom (141/141 prije dodatka MD-08), `concurrency` 6× (13/13), `depth` 10× (4/4) — vidi §4 za nalaz o treperenju. Cijeli skup od 147 testova pokrenut završno jednom (147/147).
 
 ## 2. Prihvatna matrica (`docs/P2_ACCEPTANCE.md`)
 
 ### A. Model i integritet
 
-| ID    | Status         | Dokaz / napomena                                                                                                                                                                          |
-| ----- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MD-01 | PASS           | `hierarchy` + `fixture`: jedan root, svaki roditelj postoji, sve doseže root                                                                                                              |
-| MD-02 | PASS           | dvije „Ladica 1" (fixture) + stvaranje treće                                                                                                                                              |
-| MD-03 | PASS           | `garage-box` pod `living-tv` i natrag; samo `parentId`/`version`; svi smještaji bit-po-bit isti                                                                                           |
-| MD-04 | PASS           | klijent `cycle` + sirovi batch odbijen na serveru                                                                                                                                         |
-| MD-05 | **PARTIAL**    | server odbija cikluse do **udaljenosti 6**; **7+ prolazi sirovim batchom** (`KNOWN GAP`, dokazano) — zaštita dalje je samo protokol. **Odluka D1**                                        |
-| MD-06 | PASS (uz D1)   | `concurrency`: prisilno preklapanje A→B / B→A: točno jedan uspije, drugi `cycle`; stablo acikličko, `rev == 1` (6 pokretanja, pobjednik se mijenja); sirovi batchevi: drugi pada na CAS-u |
-| MD-07 | PASS (klijent) | protokol ne piše ništa; server ne zabranjuje no-op izmjenu                                                                                                                                |
-| MD-08 | **PARTIAL**    | server NE može provjeriti „ima li potomaka/smještaja" (testirano kao znano ograničenje); blokira stvaranje u arhiviranoj lokaciji i vraćanje pod arhiviranim roditeljem. **Odluka D2**    |
-| MD-09 | PASS           | baterije: dva smještaja (fixture)                                                                                                                                                         |
-| MD-10 | PASS           | `unique` na dvije lokacije: klijent + server (ključ); **paralelno** novi `unique` predmet na dvije lokacije: točno jedan                                                                  |
-| MD-11 | PASS           | paralelno isti item/ista lokacija: točno jedan aktivan; sirovi slijepi batchevi: drugi DENIED                                                                                             |
-| MD-12 | PASS           | nepostojeći/arhivirani item ili lokacija, injekcija putanje                                                                                                                               |
-| MD-13 | PASS           | scenarij 4: samo `pl-battery-2`; `pl-battery-1` bit-po-bit isti                                                                                                                           |
-| MD-14 | PASS           | `createdAt/By`, `itemId`, `kind` nepromjenjivi; polje `id` odbijeno (ID je doc ID)                                                                                                        |
-| MD-15 | PASS           | premještaj roditelja + preimenovanje: putanja se izvodi, nijedan potomak nema pohranjen path                                                                                              |
-| MD-16 | PASS           | paralelno preimenovanje i premještaj istog zapisa: jedan uspije, drugi `changed-elsewhere`; ključevi konzistentni; zastarjeli sirovi upis DENIED                                          |
-| MD-17 | PASS           | različiti predmeti/smještaji/dodavanje u istu lokaciju paralelno: oba uspiju (nema brojača)                                                                                               |
-| MD-18 | **PARTIAL**    | `unique` predmet sa smještajem: server blokira; `type` predmet: **ne** (znano ograničenje). **Odluka D2**                                                                                 |
+| ID    | Status                                | Dokaz / napomena                                                                                                                                                                                                                           |
+| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| MD-01 | PASS                                  | `hierarchy` + `fixture`: jedan root, svaki roditelj postoji, sve doseže root                                                                                                                                                               |
+| MD-02 | PASS                                  | dvije „Ladica 1" (fixture) + stvaranje treće                                                                                                                                                                                               |
+| MD-03 | PASS                                  | `garage-box` pod `living-tv` i natrag; samo `parentId`/`version`; svi smještaji bit-po-bit isti                                                                                                                                            |
+| MD-04 | PASS                                  | klijent `cycle` + sirovi batch odbijen na serveru                                                                                                                                                                                          |
+| MD-05 | **PASS (ograničeno, D1)**             | server odbija cikluse do udaljenosti 6; **7+ prolazi sirovim batchom** (dokazano, `KNOWN GAP` na 7, 10, 20); protokol u transakciji odbija na 7/10/20; oštećeno stablo se otkriva (`findTreeProblems`). Rules NE jamče potpunu acikličnost |
+| MD-06 | PASS (uz D1)                          | `concurrency` + `depth`: prisilno preklapanje A→B / B→A, i na lancima dubine 24 (c10→e23 naspram e10→c23): točno jedan uspije, drugi `cycle`; stablo zdravo, `rev == 1`; sirovi batchevi: drugi pada na CAS-u                              |
+| MD-07 | PASS (klijent)                        | protokol ne piše ništa; server ne zabranjuje no-op izmjenu                                                                                                                                                                                 |
+| MD-08 | **ODGOĐENO (D2) — server zabranjuje** | `archived` na Location se ne može mijenjati (listovi, lokacije sa sadržajem, prostorije, root; samostalno i uz druge promjene); ništa se ne arhivira i ne briše                                                                            |
+| MD-09 | PASS                                  | baterije: dva smještaja (fixture)                                                                                                                                                                                                          |
+| MD-10 | PASS                                  | `unique` na dvije lokacije: klijent + server (ključ); **paralelno** novi `unique` predmet na dvije lokacije: točno jedan                                                                                                                   |
+| MD-11 | PASS                                  | paralelno isti item/ista lokacija: točno jedan aktivan; sirovi slijepi batchevi: drugi DENIED                                                                                                                                              |
+| MD-12 | PASS                                  | nepostojeći/arhivirani item ili lokacija, injekcija putanje                                                                                                                                                                                |
+| MD-13 | PASS                                  | scenarij 4: samo `pl-battery-2`; `pl-battery-1` bit-po-bit isti                                                                                                                                                                            |
+| MD-14 | PASS                                  | `createdAt/By`, `itemId`, `kind` nepromjenjivi; polje `id` odbijeno (ID je doc ID)                                                                                                                                                         |
+| MD-15 | PASS                                  | premještaj roditelja + preimenovanje: putanja se izvodi, nijedan potomak nema pohranjen path                                                                                                                                               |
+| MD-16 | PASS                                  | paralelno preimenovanje i premještaj istog zapisa: jedan uspije, drugi `changed-elsewhere`; ključevi konzistentni; zastarjeli sirovi upis DENIED                                                                                           |
+| MD-17 | PASS                                  | različiti predmeti/smještaji/dodavanje u istu lokaciju paralelno: oba uspiju (nema brojača)                                                                                                                                                |
+| MD-18 | **ODGOĐENO (D2) — server zabranjuje** | `archived` na Item se ne može mijenjati (unique i type, sa i bez smještaja)                                                                                                                                                                |
 
 ### B. Security Rules
 
@@ -86,8 +86,8 @@ MD-06/10/11/12/16/17 i ACL-21–32 imaju dokaz. **MD-05 i MD-06 imaju dokazani p
 
 ## 5. Rizici i ograničenja (preostalo)
 
-- **D1** ciklus dublje od 6 razina uz klijent koji zaobilazi protokol (aplikacija s ispravnim protokolom ga ne stvara; detektivna provjera stabla u P2-B preporučena).
-- **D2** arhiviranje lokacije/tip-predmeta sa sadržajem samo na klijentu.
+- **D1** (prihvaćeno uvjetno) ciklus dublje od 6 razina uz klijent koji zaobilazi protokol; P2-B mora imati potpunu provjeru lanca predaka u transakciji, detekciju oštećenog stabla i testove dubine 7/10/20 + istodobnih premještanja. Rules to ne jamče.
+- **D2** zatvoren (revizija 2): arhiviranje Location i Item zabranjeno u pravilima; vraća se tek uz novu odluku.
 - Limiti i ponašanje Rules **izmjereni u emulatoru; produkcija nije neovisno provjerena**. Dizajn drži ≤ 9 dokumenata radi rezerve.
 - Svaki `get()` u pravilima se vjerojatno naplaćuje kao čitanje (Spark 50.000/dan); ≈ do 9 po premještaju lokacije — **NOT VERIFIED**.
 - Elementi `aliases` nisu tip-provjereni na serveru.
@@ -97,3 +97,21 @@ MD-06/10/11/12/16/17 i ACL-21–32 imaju dokaz. **MD-05 i MD-06 imaju dokazani p
 ## 6. Datoteke
 
 `firestore.rules` (proširen), `rules-tests/p2/*` (helpers, ops = referentni protokol, 8 test datoteka), `rules-tests/firestore.rules.test.ts` (ACL-17 blok), `scripts/prod-guard.mjs`+`.test.ts`+`-cli.mjs` (guard:rules), `docs/P2_A_ADR.md`, ovaj izvještaj. Nema novih ovisnosti, nema `.github/workflows`, nema tajni, nema deploya, nema Blaze/Functions/Storage; GitHub Actions nisu pokretane.
+
+## 7. Revizija 2 — korekcije prema odlukama glavnog razvoja (`p2a/review-fixes`)
+
+| Zahtjev                                   | Provedba u pravilima                                                       | Dokaz (testovi)                                                                                                                                                                                                                |
+| ----------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| D1 uvjetno; ne tvrditi potpunu garanciju  | komentari u pravilima/testovima/ADR-u ispravljeni; ograničena provjera ≤ 6 | `depth`: server hvata ≤ 6, `KNOWN GAP` 7/10/20, protokol 7/10/20 (ciklus odbijen + legitimno premještanje uspije), istodobna premještanja na dubokim lancima (3 testa), `findTreeProblems` (4 testa, uključujući 5000 čvorova) |
+| D2 zabrana `archived` na Location i Item  | `n.archived == o.archived`                                                 | `hierarchy` (5 testova: listovi, sadržaj, prostorija, root, uz druge promjene, vraćanje admin-arhiviranog, obrambena provjera), `placements` (Item unique/type, vraćanje); mutacije M13, M14                                   |
+| D5 opoziv ≠ konflikt                      | referentni protokol: `accessRevoked` (server) prije tumačenja konflikta    | `revocation` 14 testova: 7 operacija, opoziv ima prednost nad zastarjelom verzijom, obrisan membership, opoziv usred transakcije i usred utrke; aktivni član i dalje dobiva `changed-elsewhere`/`duplicate-placement`          |
+| `Location.kind` nepromjenjiv              | `n.kind == o.kind`                                                         | `hierarchy` (7 kombinacija odbijeno, isti kind dopušten); mutacija M11                                                                                                                                                         |
+| Samo root je `house`, root uvijek `house` | kreiranje po ID-u (`root` ⇒ house, ostali ⇒ ≠ house) + nepromjenjiv kind   | `hierarchy` (3 ne-root pokušaja, root s kindom room/box odbijen, root kao house prolazi); `fixture`; mutacije M15, M16                                                                                                         |
+| Prostorije se ne premještaju (server)     | reparent traži `o.kind != 'room'`                                          | `hierarchy`: 3 prostorije sirovim batchom s ispravnim rev-om i bez ciklusa odbijene, `room-immovable` u protokolu, ne-prostorije se i dalje premještaju, prostorija se može preimenovati; mutacija M12                         |
+
+Izlazi (revizija 2): `typecheck`/`lint` OK · Vitest 83/83 · build OK · `check:no-actions` OK · `guard:rules` OK (`c141f0dda1dd`) · `test:rules` **187/187**, ponovljeno 3× (isti rezultat) · `test:e2e` (P1) 14/14 · mutacije ACL-31 sada **16** (6 novih).
+Testovi koje je trebalo prepisati jer je politika promijenjena (ne zato što su bili pogrešni): 5 starih testova arhiviranja (MD-08/MD-18) postali su negativni testovi D2; 4 ACL testa sada očekuju `access-revoked` umjesto sirovog `permission-denied` kad ih zove referentni protokol.
+
+**Nove greške u vlastitim testovima, ispravljene:** barijera za dvoje u testu u kojem A baca `cycle` prije točke preklapanja (timeout, ne greška pravila).
+**Otvoreno / pitanje glavnom razvoju:** handoff kaže "prostorije su djeca root-a", ali pravila to **ne** nameću pri kreiranju (kreiranje prostorije ispod ormara bilo bi moguće, a kasnije je nepomično). Nisam dodao to pravilo jer nije traženo; fixture ga zadovoljava. Treba li?
+**Nije provjereno:** produkcijsko ponašanje pravila/limita, Android, naplata čitanja unutar pravila. Ništa nije deployano.
