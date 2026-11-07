@@ -183,24 +183,38 @@ describe('ACL — pisanje članstva i eskalacija', () => {
 });
 
 describe('ACL — ostale putanje (P2/P3 kolekcije i nepoznato)', () => {
-  const subs = ['locations', 'items', 'placements', 'appliedOps'] as const;
+  // P2-A: locations/items/placements su sada čitljivi aktivnim članovima, ali svaki upis mora proći strogu
+  // shemu (testirano u rules-tests/p2). appliedOps (P3) ostaje potpuno zatvoren.
+  const open = ['locations', 'items', 'placements'] as const;
   const ids: Record<string, string> = {
     locations: 'loc1',
     items: 'item1',
     placements: 'pl1',
     appliedOps: 'op1',
   };
-  for (const sub of subs) {
-    it(`ACL-17 uidA READ/WRITE ${sub}`, async () => {
+  for (const sub of open) {
+    it(`ACL-17 (P2-A) uidA čita ${sub}, ali NESTRUKTURIRAN upis ({x:1}) je odbijen; nečlan ne smije ništa`, async () => {
       const db = as('uidA');
       const ref = doc(db, 'households', H1, sub, ids[sub]!);
-      await assertFails(getDoc(ref));
-      await assertFails(getDocs(collection(db, 'households', H1, sub)));
+      await assertSucceeds(getDoc(ref));
+      await assertSucceeds(getDocs(collection(db, 'households', H1, sub)));
       await assertFails(setDoc(doc(db, 'households', H1, sub, 'novi'), { x: 1 }));
       await assertFails(updateDoc(ref, { x: 2 }));
       await assertFails(deleteDoc(ref));
+      const other = as('uidC');
+      await assertFails(getDoc(doc(other, 'households', H1, sub, ids[sub]!)));
+      await assertFails(getDocs(collection(other, 'households', H1, sub)));
     });
   }
+  it('ACL-17 uidA READ/WRITE appliedOps (P3) i dalje potpuno odbijeno', async () => {
+    const db = as('uidA');
+    const ref = doc(db, 'households', H1, 'appliedOps', 'op1');
+    await assertFails(getDoc(ref));
+    await assertFails(getDocs(collection(db, 'households', H1, 'appliedOps')));
+    await assertFails(setDoc(doc(db, 'households', H1, 'appliedOps', 'novi'), { x: 1 }));
+    await assertFails(updateDoc(ref, { x: 2 }));
+    await assertFails(deleteDoc(ref));
+  });
   it('ACL-18 nepoznate putanje (read i write)', async () => {
     const db = as('uidA');
     for (const path of [

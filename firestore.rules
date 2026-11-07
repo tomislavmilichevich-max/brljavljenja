@@ -1,29 +1,216 @@
 rules_version = '2';
 
-// P1: pristup kućanstvu samo za aktivne članove (members/{uid}.enabled == true).
-// Članstvo upisuje ISKLJUČIVO vlasnik kroz Firebase Console (Admin zaobilazi pravila);
-// klijent nema nikakav write nigdje. Sve ostalo je odbijeno (nema catch-all allow).
-// Google prijava sama NIJE autorizacija. Rules nisu filter upita: dopušten je samo `get`.
+// P1 + P2-A. Pristup: samo aktivni član kućanstva (members/{uid}.enabled == true, boolean).
+// Članstvo i dokument kućanstva pišu se ISKLJUČIVO kroz Firebase Console (Admin zaobilazi pravila).
+// Klijentski upisi postoje samo za inventar (meta/tree, locations, items, placements, placementKeys)
+// i svaki mora proći strogu shemu + invarijante opisane u docs/P2_A_ADR.md.
+// Sve ostalo (npr. appliedOps — P3) nema pravilo => implicitno DENY. Nikad `if true`.
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ---------- članstvo ----------
     function isActiveMember(householdId) {
       return request.auth != null
         && exists(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid))
         && get(/databases/$(database)/documents/households/$(householdId)/members/$(request.auth.uid)).data.get('enabled', false) == true;
     }
 
+    // ---------- putanje ----------
+    function locP(h, id) { return /databases/$(database)/documents/households/$(h)/locations/$(id); }
+    function itemP(h, id) { return /databases/$(database)/documents/households/$(h)/items/$(id); }
+    function plP(h, id) { return /databases/$(database)/documents/households/$(h)/placements/$(id); }
+    function keyP(h, id) { return /databases/$(database)/documents/households/$(h)/placementKeys/$(id); }
+    function treeP(h) { return /databases/$(database)/documents/households/$(h)/meta/tree; }
+
+    // ---------- opći validatori ----------
+    // ID-ovi koji ulaze u putanje MORAJU proći ovaj regex (sprječava injekciju '/' u putanju). Bez '_' i '/'.
+    function validId(s) { return s is string && s.size() >= 1 && s.size() <= 64 && s.matches('^[a-z0-9]+(-[a-z0-9]+)*$'); }
+    function validName(s) { return s is string && s == s.trim() && s.size() >= 1 && s.size() <= 120; }
+    function optStr(v, max) { return v == null || (v is string && v.size() <= max); }
+    function isInt(v) { return v is int; }
+
+    // Audit polja pri kreiranju: serverska vremena i UID prijavljenog korisnika.
+    function createAudit(d) {
+      return d.version == 1
+        && d.archived == false
+        && d.createdAt == request.time && d.updatedAt == request.time
+        && d.createdBy == request.auth.uid && d.updatedBy == request.auth.uid;
+    }
+    // Audit polja pri izmjeni: nepromjenjivi createdAt/createdBy, version + 1, novi updatedAt/By.
+    function updateAudit(o, n) {
+      return n.createdAt == o.createdAt && n.createdBy == o.createdBy
+        && n.version == o.version + 1
+        && n.updatedAt == request.time && n.updatedBy == request.auth.uid
+        && n.archived is bool;
+    }
+
+    // ---------- Location ----------
+    function locFields() {
+      return ['name', 'parentId', 'kind', 'version', 'archived', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'];
+    }
+    function locKinds() { return ['house', 'room', 'cabinet', 'shelf', 'box', 'drawer', 'other']; }
+    function locShape(d) {
+      return d.keys().hasOnly(locFields()) && d.keys().hasAll(locFields())
+        && validName(d.name) && d.kind in locKinds() && isInt(d.version);
+    }
+
+    // Provjera ACIKLIČNOSTI na poslužitelju: nova lokacija-roditelj y ne smije biti L niti L smije biti među
+    // y-ovim precima. Rules nemaju petlje/rekurziju pa je obilazak razmotan: y + 5 predaka (6 dokumenata);
+    // L se uspoređuje s y i prvih 6 predaka, tj. otkrivaju se ciklusi do UDALJENOSTI 6. Namjerno NE do limita
+    // od 10 različitih dokumenata po upisu: izmjereno je da emulator na samoj granici (10) nedeterministički
+    // odbija legitimne upise (50 % pokretanja), a s ≤ 9 dokumenata nema kvarova (vidi ADR i P2_A_TEST_REPORT).
+    // Dublje od toga NIJE provjerivo u Rules — zaštita je protokol meta/tree + klijent (ADR R-1).
+    function parentOf(h, id) { return get(locP(h, id)).data.parentId; }
+    function up6(L, a) { return a == null || a != L; }
+    function up5(h, L, a) { return a == null || (a != L && up6(L, parentOf(h, a))); }
+    function up4(h, L, a) { return a == null || (a != L && up5(h, L, parentOf(h, a))); }
+    function up3(h, L, a) { return a == null || (a != L && up4(h, L, parentOf(h, a))); }
+    function up2(h, L, a) { return a == null || (a != L && up3(h, L, parentOf(h, a))); }
+    function up1(h, L, a) { return a == null || (a != L && up2(h, L, parentOf(h, a))); }
+    function noCycle(h, L, y) { return y != L && up1(h, L, parentOf(h, y)); }
+
+    // Svaka promjena roditelja MORA istim atomarnim upisom povećati meta/tree.rev za točno 1 (CAS):
+    // dva istodobna premještanja s istog stanja ne mogu oba uspjeti.
+    function treeBumped(h) {
+      return getAfter(treeP(h)).data.rev == get(treeP(h)).data.rev + 1;
+    }
+
+    function validLocationCreate(h, id, d) {
+      return validId(id) && locShape(d) && createAudit(d)
+        && (id == 'root'
+          ? (d.parentId == null && d.kind == 'house')
+          : (validId(d.parentId) && d.parentId != id && get(locP(h, d.parentId)).data.archived == false));
+    }
+
+    function validLocationUpdate(h, id, o, n) {
+      return locShape(n) && updateAudit(o, n)
+        // root: nepromjenjiv položaj i ne arhivira se
+        && (o.parentId != null || (n.parentId == null && n.archived == false))
+        // promjena roditelja
+        && (n.parentId == o.parentId
+          || (o.parentId != null && o.archived == false && n.archived == false
+              && validId(n.parentId) && noCycle(h, id, n.parentId)
+              && get(locP(h, n.parentId)).data.archived == false
+              && treeBumped(h)))
+        // vraćanje iz arhive traži aktivnog roditelja (arhiviranje i premještanje ne idu u istom upisu)
+        && (n.archived == o.archived
+          || (n.parentId == o.parentId
+              && (n.archived == true || get(locP(h, n.parentId)).data.archived == false)));
+    }
+
+    // ---------- Item ----------
+    function itemFields() {
+      return ['name', 'kind', 'aliases', 'category', 'note', 'version', 'archived', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'];
+    }
+    function itemShape(d) {
+      return d.keys().hasOnly(itemFields()) && d.keys().hasAll(itemFields())
+        && validName(d.name) && d.kind in ['unique', 'type'] && isInt(d.version)
+        && d.aliases is list && d.aliases.size() <= 20 && d.aliases.join('|').size() <= 1600
+        && optStr(d.category, 60) && optStr(d.note, 1000);
+    }
+    function validItemUpdate(h, id, o, n) {
+      return itemShape(n) && updateAudit(o, n)
+        && n.kind == o.kind
+        // arhiviranje jedinstvenog predmeta traži da njegov ključ smještaja više ne postoji nakon upisa
+        && (n.archived == o.archived || n.archived == false
+            || n.kind != 'unique' || !existsAfter(keyP(h, id + '__unique')));
+    }
+
+    // ---------- Placement + ključevi (jedinstvenost) ----------
+    // Ključ postoji AKO I SAMO AKO postoji aktivan smještaj: unique => {item}__unique, type => {item}__at__{lokacija}.
+    // Zaključni dokumenti se samo stvaraju/brišu (nikad update) pa drugi create istog ID-a pada.
+    function keyIdFor(kind, itemId, locId) {
+      return kind == 'unique' ? itemId + '__unique' : itemId + '__at__' + locId;
+    }
+    function plFields() {
+      return ['itemId', 'locationId', 'version', 'archived', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'];
+    }
+    function plShape(d) {
+      return d.keys().hasOnly(plFields()) && d.keys().hasAll(plFields())
+        && validId(d.itemId) && validId(d.locationId) && isInt(d.version);
+    }
+    function validPlacementCreate(h, id, d) {
+      return validId(id) && plShape(d) && createAudit(d)
+        && get(itemP(h, d.itemId)).data.archived == false
+        && get(locP(h, d.locationId)).data.archived == false
+        && getAfter(keyP(h, keyIdFor(get(itemP(h, d.itemId)).data.kind, d.itemId, d.locationId))).data.placementId == id;
+    }
+    function validPlacementUpdate(h, id, o, n) {
+      return plShape(n) && updateAudit(o, n)
+        && n.itemId == o.itemId && o.archived == false
+        // točno jedna promjena: premještaj ILI arhiviranje
+        && ((n.locationId != o.locationId) != (n.archived == true))
+        && (n.archived == true
+          ? !existsAfter(keyP(h, keyIdFor(get(itemP(h, o.itemId)).data.kind, o.itemId, o.locationId)))
+          : (get(locP(h, n.locationId)).data.archived == false
+              && (get(itemP(h, o.itemId)).data.kind == 'unique'
+                  ? getAfter(keyP(h, o.itemId + '__unique')).data.placementId == id
+                  : (!existsAfter(keyP(h, o.itemId + '__at__' + o.locationId))
+                     && getAfter(keyP(h, o.itemId + '__at__' + n.locationId)).data.placementId == id))));
+    }
+    function validKeyCreate(h, kid, d) {
+      return d.keys().hasAny(['placementId']) && validId(d.placementId) && validId(d.itemId)
+        && getAfter(plP(h, d.placementId)).data.itemId == d.itemId
+        && getAfter(plP(h, d.placementId)).data.archived == false
+        && (get(itemP(h, d.itemId)).data.kind == 'unique'
+          ? (d.keys().hasOnly(['placementId', 'itemId']) && kid == d.itemId + '__unique')
+          : (d.keys().hasOnly(['placementId', 'itemId', 'locationId'])
+             && d.locationId == getAfter(plP(h, d.placementId)).data.locationId
+             && kid == d.itemId + '__at__' + d.locationId));
+    }
+    function validKeyDelete(h, o) {
+      // ključ smije nestati samo kad smještaj više ne zauzima to mjesto (arhiviran ili premješten)
+      return getAfter(plP(h, o.placementId)).data.archived == true
+        || ('locationId' in o && getAfter(plP(h, o.placementId)).data.locationId != o.locationId);
+    }
+
+    // ---------- pravila po putanjama ----------
     match /households/{householdId} {
-      // Samo get (bez list) i samo aktivni član. Klijentski write zabranjen.
       allow get: if isActiveMember(householdId);
 
       match /members/{uid} {
-        // Aktivni član smije dohvatiti samo VLASTITI dokument. Bez list-a i bez write-a.
         allow get: if isActiveMember(householdId) && request.auth.uid == uid;
       }
 
-      // locations, items, placements, appliedOps i sve ostale putanje:
-      // namjerno bez pravila => implicitno DENY (P2/P3 uvode validirana pravila).
+      match /meta/{docId} {
+        allow get: if isActiveMember(householdId) && docId == 'tree';
+        allow create: if isActiveMember(householdId) && docId == 'tree'
+          && request.resource.data.keys().hasOnly(['rev']) && request.resource.data.rev == 0;
+        allow update: if isActiveMember(householdId) && docId == 'tree'
+          && request.resource.data.keys().hasOnly(['rev'])
+          && request.resource.data.rev == resource.data.rev + 1;
+      }
+
+      match /locations/{locationId} {
+        allow get, list: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && validLocationCreate(householdId, locationId, request.resource.data);
+        allow update: if isActiveMember(householdId)
+          && validLocationUpdate(householdId, locationId, resource.data, request.resource.data);
+      }
+
+      match /items/{itemId} {
+        allow get, list: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId) && validId(itemId)
+          && itemShape(request.resource.data) && createAudit(request.resource.data);
+        allow update: if isActiveMember(householdId)
+          && validItemUpdate(householdId, itemId, resource.data, request.resource.data);
+      }
+
+      match /placements/{placementId} {
+        allow get, list: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId)
+          && validPlacementCreate(householdId, placementId, request.resource.data);
+        allow update: if isActiveMember(householdId)
+          && validPlacementUpdate(householdId, placementId, resource.data, request.resource.data);
+      }
+
+      match /placementKeys/{keyId} {
+        allow get: if isActiveMember(householdId);
+        allow create: if isActiveMember(householdId) && validKeyCreate(householdId, keyId, request.resource.data);
+        allow delete: if isActiveMember(householdId) && validKeyDelete(householdId, resource.data);
+      }
+      // appliedOps (P3) i sve ostalo: bez pravila => DENY.
     }
   }
 }
