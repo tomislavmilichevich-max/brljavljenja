@@ -65,6 +65,15 @@ households/{householdId}/appliedOps/{opId}          # P3
 
 Emulator test mora eksplicitno učitati `firestore.rules`. Ako emulator ili Java nisu dostupni, **status je BLOKIRANO**, a ne PASS; bez dokaza nije dopušten deploy novih pravila.
 
+## P2-A: pravila za inventar (implementirano u emulatoru, NIJE deployano)
+
+Detalji i dokazi: `docs/P2_A_ADR.md`, `docs/P2_A_TEST_REPORT.md` (pravila sha256 `b998f2269754`). Sažetak:
+
+- `locations`, `items`, `placements`, `meta/tree`: čitanje samo aktivnom članu; upis samo uz strogu shemu, `version + 1`, serverska vremena i `auth.uid`; bez tvrdog brisanja.
+- Jedinstvenost smještaja kroz `placementKeys` (create/delete, nikad update); strukturne promjene stabla serijalizirane CAS-om na `meta/tree.rev`.
+- `appliedOps` (P3) i sve nepoznato: DENY. Članstvo/kućanstvo: nepromijenjeno iz P1.
+- **Otvoreno:** potpuna acikličnost bez ograničenja dubine nije izvediva u Rules (server provjerava do udaljenosti 6) i arhiviranje lokacije/tip-predmeta sa sadržajem je samo klijentska provjera — odluke D1/D2 čekaju glavni razvoj. Pravila se ne smiju deployati prije P2-B klijenta i odobrenja.
+
 ## Granice P3 (još nije implementirano)
 
 Firestore lokalni cache podržava offline čitanje/upis, ali „last write wins“ nije dovoljan za istodobno premještanje predmeta. Online transakcija mora provjeriti `baseVersion`; `operationId` i ažuriranje trebaju atomsku idempotenciju. Sigurnosna pravila moraju posebno štititi reference i sistemska polja. Ovu logiku **ne implementirati u P1**.
