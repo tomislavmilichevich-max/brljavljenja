@@ -24,7 +24,9 @@ export type SessionEvent =
   | { type: 'revalidated'; uid: string; result: AccessResult; at: number }
   | { type: 'sign-in-started' }
   | { type: 'sign-in-error'; kind: SignInErrorKind }
-  | { type: 'recheck' };
+  | { type: 'recheck' }
+  /** P2-B: opoziv otkriven u podatkovnom sloju (listener ili operacija) — odmah ukloni odobrenje. */
+  | { type: 'revoked'; uid: string };
 
 export const initialSession: SessionState = { phase: 'initializing' };
 
@@ -69,6 +71,10 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
       if (r.kind === 'household-missing') return { phase: 'access-error', user, kind: r.kind };
       return state.stale ? state : { ...state, stale: true };
     }
+    case 'revoked':
+      return state.phase === 'member' && state.user.uid === event.uid
+        ? { phase: 'denied', user: state.user }
+        : state;
     case 'recheck':
       return 'user' in state ? { phase: 'checking-access', user: state.user } : state;
     case 'sign-in-started':

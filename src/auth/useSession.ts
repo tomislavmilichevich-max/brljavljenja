@@ -117,6 +117,10 @@ export function useSession(services: Services) {
   }, [services]);
 
   const recheck = useCallback(() => dispatch({ type: 'recheck' }), []);
+  const memberUidForRevoke = state.phase === 'member' ? state.user.uid : null;
+  const revoke = useCallback(() => {
+    if (memberUidForRevoke) dispatch({ type: 'revoked', uid: memberUidForRevoke });
+  }, [memberUidForRevoke]);
 
-  return { state, signIn, signOut, recheck, signOutFailed };
+  return { state, signIn, signOut, recheck, revoke, signOutFailed };
 }

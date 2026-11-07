@@ -32,6 +32,11 @@ export function classifyAccessError(error: unknown): 'denied' | 'offline' | 'unk
   const code =
     typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
   if (code === 'permission-denied') return 'denied';
-  if (code === 'unavailable' || code === 'deadline-exceeded') return 'offline';
+  if (
+    code === 'unavailable' ||
+    code === 'deadline-exceeded' ||
+    code === 'auth/network-request-failed'
+  )
+    return 'offline';
   return 'unknown';
 }

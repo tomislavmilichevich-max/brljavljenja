@@ -14,6 +14,40 @@ export default tseslint.config(
     rules: { ...reactHooks.configs.recommended.rules },
   },
   {
+    // P2-B: izmjene ISKLJUČIVO online kroz transakcije u repozitoriju. Ove funkcije stavljaju upis u skriveni
+    // lokalni red kad nema veze (izmjereno u sdk-tests/offline), a keš smije biti samo memorijski.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/inventory/repository.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'firebase/firestore',
+              importNames: [
+                'setDoc',
+                'updateDoc',
+                'addDoc',
+                'deleteDoc',
+                'writeBatch',
+                'persistentLocalCache',
+                'persistentSingleTabManager',
+                'persistentMultipleTabManager',
+                'enableIndexedDbPersistence',
+                'enableMultiTabIndexedDbPersistence',
+                'enableNetwork',
+                'disableNetwork',
+              ],
+              message:
+                'Zabranjeno izvan src/inventory/repository.ts (P2-B): upisi samo kroz runTransaction (bez skrivenog offline reda), keš samo memorijski.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: [
       'vite.config.ts',
       'vitest.config.ts',

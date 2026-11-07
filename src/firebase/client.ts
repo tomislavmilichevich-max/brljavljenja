@@ -11,17 +11,15 @@ import {
   signOut as fbSignOut,
   type Auth,
 } from 'firebase/auth';
-import {
-  connectFirestoreEmulator,
-  doc,
-  getDocFromServer,
-  getFirestore,
-  type Firestore,
-} from 'firebase/firestore';
+import { doc, getDocFromServer } from 'firebase/firestore';
 import type { FirebasePublicConfig } from '../config/env';
 import { evaluateAccess } from '../auth/access';
 import { classifyAuthError, shouldFallBackToRedirect } from '../auth/errors';
 import type { AccessPort, AccessResult, AuthPort, Services } from '../auth/types';
+import { createInventoryRepository } from '../inventory/repository';
+import type { InventoryPort } from '../inventory/port';
+import { watchInventory } from '../inventory/watch';
+import { openDataSession, type EmulatorEndpoints } from './dataSession';
 
 /** Emulatori samo u dev načinu i samo izričitom zastavicom — nikad u produkcijskom buildu. */
 const useEmulators = import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS === 'true';
@@ -29,18 +27,19 @@ const useEmulators = import.meta.env.DEV && import.meta.env.VITE_USE_EMULATORS =
 interface Handles {
   app: FirebaseApp;
   auth: Auth;
-  db: Firestore;
 }
+
+const EMULATOR: EmulatorEndpoints | undefined = useEmulators
+  ? { authUrl: 'http://127.0.0.1:9099', firestoreHost: '127.0.0.1', firestorePort: 8080 }
+  : undefined;
 
 function init(config: FirebasePublicConfig): Handles {
   const app = initializeApp(config);
   const auth = getAuth(app);
-  // getFirestore: u P1 je memorijski cache (bez IndexedDB persistencea) pa nakon odjave/reloada
-  // na uređaju ne ostaje privatni sadržaj kućanstva. Persistence se uvodi tek s P2/P3 uz test prelaska računa.
-  const db = getFirestore(app);
+  // P2-B: primarna instanca NEMA Firestore (nema keša koji bi preživio odjavu). Sva čitanja/pisanja idu kroz
+  // izolirane podatkovne sesije (dataSession.ts) koje se uništavaju pri odjavi/promjeni računa/opozivu.
   if (useEmulators) {
     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-    connectFirestoreEmulator(db, '127.0.0.1', 8080);
     // Samo za automatizirani e2e protiv emulatora (u produkcijskom buildu ovaj blok ne postoji jer je DEV=false).
     // Sandbox ne doseže apis.google.com pa se pravi popup ne može vrtjeti; emulator prima lažni Google token.
     (window as unknown as Record<string, unknown>).__e2eSignInWithEmulatorAccount = (
@@ -58,7 +57,7 @@ function init(config: FirebasePublicConfig): Handles {
         ),
       );
   }
-  return { app, auth, db };
+  return { app, auth };
 }
 
 function createAuthPort({ auth }: Handles): AuthPort {
@@ -93,17 +92,44 @@ function createAuthPort({ auth }: Handles): AuthPort {
   };
 }
 
-function createAccessPort({ db }: Handles, householdId: string): AccessPort {
+function createAccessPort(
+  { auth }: Handles,
+  config: FirebasePublicConfig,
+  householdId: string,
+): AccessPort {
   return {
     async checkAccess(): Promise<AccessResult> {
       // householdId je u konfiguraciji, ali NIJE autorizacija: odluku donose Security Rules.
-      // getDocFromServer (NE getDoc): getDoc offline tiho vraća predmemorirani dokument, što bi pokazalo
-      // 'odobren' bez potvrde poslužitelja (opozvani član) ili drugom računu na istom uređaju nakon odjave.
+      // Provjera ide kroz KRATKOTRAJNU izoliranu sesiju i getDocFromServer (NIKAD iz keša): ništa ne ostaje u
+      // kešu nakon provjere, a offline se ne prikazuje 'odobren'.
       return evaluateAccess(async () => {
-        const snap = await getDocFromServer(doc(db, 'households', householdId));
-        const name = snap.exists() ? ((snap.data()?.name as string | undefined) ?? null) : null;
-        return { exists: snap.exists(), name };
+        const session = await openDataSession(auth, config, EMULATOR);
+        try {
+          const snap = await getDocFromServer(doc(session.db, 'households', householdId));
+          const name = snap.exists() ? ((snap.data()?.name as string | undefined) ?? null) : null;
+          return { exists: snap.exists(), name };
+        } finally {
+          await session.dispose();
+        }
       });
+    },
+  };
+}
+
+function createInventoryPort(
+  { auth }: Handles,
+  config: FirebasePublicConfig,
+  householdId: string,
+): InventoryPort {
+  return {
+    async open() {
+      const s = await openDataSession(auth, config, EMULATOR);
+      return {
+        uid: s.uid,
+        repo: createInventoryRepository({ db: s.db, householdId, uid: s.uid }),
+        watch: (onState) => watchInventory(s.db, householdId, onState),
+        dispose: s.dispose,
+      };
     },
   };
 }
@@ -113,5 +139,9 @@ export function createFirebaseServices(
   householdId: string,
 ): Services {
   const handles = init(config);
-  return { auth: createAuthPort(handles), access: createAccessPort(handles, householdId) };
+  return {
+    auth: createAuthPort(handles),
+    access: createAccessPort(handles, config, householdId),
+    data: createInventoryPort(handles, config, householdId),
+  };
 }
