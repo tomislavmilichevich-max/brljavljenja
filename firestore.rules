@@ -133,11 +133,14 @@ service cloud.firestore {
       return d.keys().hasOnly(plFields()) && d.keys().hasAll(plFields())
         && validId(d.itemId) && validId(d.locationId) && isInt(d.version);
     }
+    // P2B-REV-04: predmet se čita getAfter() (stanje NAKON upisa), pa se Item, prvi Placement i ključ mogu stvoriti
+    // ATOMARNO u jednoj transakciji/batchu. To je sigurno jer su `kind` i `archived` predmeta nepromjenjivi (D2):
+    // za već postojeći predmet post-stanje je identično pre-stanju. Predmet koji ne postoji ni nakon upisa => greška => DENY.
     function validPlacementCreate(h, id, d) {
       return validId(id) && plShape(d) && createAudit(d)
-        && get(itemP(h, d.itemId)).data.archived == false
+        && getAfter(itemP(h, d.itemId)).data.archived == false
         && get(locP(h, d.locationId)).data.archived == false
-        && getAfter(keyP(h, keyIdFor(get(itemP(h, d.itemId)).data.kind, d.itemId, d.locationId))).data.placementId == id;
+        && getAfter(keyP(h, keyIdFor(getAfter(itemP(h, d.itemId)).data.kind, d.itemId, d.locationId))).data.placementId == id;
     }
     function validPlacementUpdate(h, id, o, n) {
       return plShape(n) && updateAudit(o, n)
@@ -156,7 +159,7 @@ service cloud.firestore {
       return d.keys().hasAny(['placementId']) && validId(d.placementId) && validId(d.itemId)
         && getAfter(plP(h, d.placementId)).data.itemId == d.itemId
         && getAfter(plP(h, d.placementId)).data.archived == false
-        && (get(itemP(h, d.itemId)).data.kind == 'unique'
+        && (getAfter(itemP(h, d.itemId)).data.kind == 'unique'
           ? (d.keys().hasOnly(['placementId', 'itemId']) && kid == d.itemId + '__unique')
           : (d.keys().hasOnly(['placementId', 'itemId', 'locationId'])
              && d.locationId == getAfter(plP(h, d.placementId)).data.locationId

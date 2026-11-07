@@ -391,7 +391,7 @@ describe('ACL-31 testovi imaju zube: namjerno pokvarena pravila MORAJU oboriti s
       name: 'M8 smještaj ne mora imati ključ',
       mutate: (r) =>
         r.replace(
-          /&& getAfter\(keyP\(h, keyIdFor\(get\(itemP\(h, d\.itemId\)\)\.data\.kind, d\.itemId, d\.locationId\)\)\)\.data\.placementId == id;/,
+          /&& getAfter\(keyP\(h, keyIdFor\(getAfter\(itemP\(h, d\.itemId\)\)\.data\.kind, d\.itemId, d\.locationId\)\)\)\.data\.placementId == id;/,
           ';',
         ),
       probe: (e) =>
