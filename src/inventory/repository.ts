@@ -48,14 +48,43 @@ export interface ItemPatch {
   note?: string | null;
 }
 
+/** Unaprijed sačuvani ID-evi jednog pokušaja stvaranja predmeta (P2-C, UX-033-05): omogućuju provjeru ishoda. */
+export interface CreateAttempt {
+  itemId: string;
+  placementId: string;
+}
+export const newCreateAttempt = (): CreateAttempt => ({ itemId: newId(), placementId: newId() });
+
+/**
+ * P2-C: što provjeriti nakon 'outcome-unknown'. Provjera ide ISKLJUČIVO server-potvrđenim čitanjem (getDocFromServer)
+ * i usporedbom IDENTITETA/VERZIJE objekta — nikad po nazivu. Nikad ne ponavlja upis.
+ */
+export type VerifySpec =
+  | { op: 'createItem'; itemId: string; placementId: string }
+  | { op: 'createLocation'; id: string }
+  | { op: 'addPlacement'; itemId: string; locationId: string }
+  | { op: 'updateItem'; id: string; expectedVersion: number; patch: ItemPatch }
+  | { op: 'renameLocation'; id: string; expectedVersion: number; name: string }
+  | { op: 'moveLocation'; id: string; expectedVersion: number; newParentId: string }
+  | { op: 'movePlacement'; id: string; expectedVersion: number; newLocationId: string };
+
+/**
+ * applied = server pokazuje upravo ovu promjenu; not-applied = server pokazuje stanje PRIJE promjene;
+ * changed-elsewhere = zapis je u drugoj verziji (netko drugi), ne može se tvrditi ništa o našem pokušaju;
+ * unknown = server nije dostupan, ishod i dalje nepoznat.
+ */
+export type VerifyResult = 'applied' | 'not-applied' | 'changed-elsewhere' | 'unknown';
+
 export interface InventoryRepository {
   /** Stvara meta/tree i root ako ne postoje (izričita radnja korisnika; ne stvara nikakve demo podatke). */
   bootstrap(): Promise<{ created: string[] }>;
+  /** `id` (neobavezno) = unaprijed sačuvan ID pokušaja; ponovni poziv s istim ID-em je idempotentan. */
   createLocation(input: {
     name: string;
     parentId: string;
     kind: LocationKind;
-  }): Promise<{ id: string }>;
+    id?: string;
+  }): Promise<{ id: string; alreadyExisted?: boolean }>;
   renameLocation(id: string, name: string, expectedVersion: number): Promise<void>;
   moveLocation(id: string, newParentId: string, expectedVersion?: number): Promise<void>;
   /**
@@ -69,11 +98,19 @@ export interface InventoryRepository {
     aliases?: string[];
     category?: string | null;
     note?: string | null;
-  }): Promise<{ itemId: string; placementId: string }>;
+    /**
+     * P2-C: ID-evi pokušaja sačuvani PRIJE poziva (newCreateAttempt). Ponovni poziv s istim pokušajem je IDEMPOTENTAN:
+     * ako Item već postoji s tim ID-em i istim prvim Placementom, ne piše se ništa (`alreadyExisted`). Time ponovni
+     * pokušaj nakon 'outcome-unknown' ne može stvoriti duplikat.
+     */
+    attempt?: CreateAttempt;
+  }): Promise<{ itemId: string; placementId: string; alreadyExisted?: boolean }>;
   updateItem(id: string, patch: ItemPatch, expectedVersion: number): Promise<void>;
   addPlacement(itemId: string, locationId: string): Promise<{ id: string }>;
   movePlacement(id: string, newLocationId: string, expectedVersion: number): Promise<void>;
   archivePlacement(id: string, expectedVersion: number): Promise<void>;
+  /** Samo čitanje, server-potvrđeno; ne mijenja ništa i ne ponavlja nijedan upis. */
+  verify(spec: VerifySpec): Promise<VerifyResult>;
 }
 
 export const keyIdFor = (kind: ItemKind, itemId: string, locationId: string) =>
@@ -192,16 +229,28 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
       );
     },
 
-    async createLocation({ name, parentId, kind }) {
+    async createLocation({ name, parentId, kind, id: given }) {
       const cleaned = cleanName(name);
       checkLocationKind(kind);
       // P2-LOC-ROOM-01 (isto pravilo kao u firestore.rules): prostorija isključivo pod root
       if (kind === 'room' && parentId !== ROOT_ID) throw new DomainError('room-parent');
       const hooks = once();
-      const id = newId();
+      const id = given ?? newId();
+      let alreadyExisted = false;
       await run((mark) =>
         commitTx(mark, async (tx) => {
-          const parent = await tx.get(ref(`locations/${parentId}`));
+          alreadyExisted = false;
+          const [parent, existing] = await Promise.all([
+            tx.get(ref(`locations/${parentId}`)),
+            tx.get(ref(`locations/${id}`)),
+          ]);
+          if (existing.exists()) {
+            // idempotentni ponovni pokušaj: ista lokacija (isti ID, roditelj, vrsta) => ništa se ne piše
+            const d = existing.data();
+            if (d.parentId !== parentId || d.kind !== kind) throw new DomainError('unknown');
+            alreadyExisted = true;
+            return;
+          }
           if (!parent.exists() || parent.data().archived) throw new DomainError('bad-parent');
           await hooks.afterReads?.();
           tx.set(ref(`locations/${id}`), {
@@ -214,7 +263,7 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           });
         }),
       );
-      return { id };
+      return alreadyExisted ? { id, alreadyExisted } : { id };
     },
 
     async renameLocation(id, name, expectedVersion) {
@@ -283,7 +332,7 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
       }
     },
 
-    async createItemWithPlacement({ name, kind, locationId, aliases, category, note }) {
+    async createItemWithPlacement({ name, kind, locationId, aliases, category, note, attempt }) {
       const cleaned = cleanName(name);
       checkItemKind(kind);
       if (!locationId || !locationId.trim())
@@ -294,12 +343,31 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
         note: cleanOptional(note, LIMITS.note, 'Napomena'),
       };
       const hooks = once();
-      const itemId = newId();
-      const placementId = newId();
+      const { itemId, placementId } = attempt ?? newCreateAttempt();
+      let alreadyExisted = false;
       await run((mark) =>
         commitTx(mark, async (tx) => {
+          alreadyExisted = false;
           // Čitanje lokacije PRIJE pisanja: bez veze pada prije commita => sigurno 'offline' (ne 'outcome-unknown').
-          const loc = await tx.get(ref(`locations/${locationId}`));
+          const [loc, existingItem, existingPl] = await Promise.all([
+            tx.get(ref(`locations/${locationId}`)),
+            tx.get(ref(`items/${itemId}`)),
+            tx.get(ref(`placements/${placementId}`)),
+          ]);
+          if (existingItem.exists() || existingPl.exists()) {
+            // Idempotentni ponovni pokušaj (isti sačuvani ID-evi): ako je prethodni pokušaj ipak stigao do
+            // poslužitelja, NE piše se ništa. Provjera je po IDENTITETU (ID Itema i prvog Placementa), ne po nazivu.
+            if (
+              existingItem.exists() &&
+              existingPl.exists() &&
+              existingPl.data().itemId === itemId &&
+              existingItem.data().kind === kind
+            ) {
+              alreadyExisted = true;
+              return;
+            }
+            throw new DomainError('unknown', 'ID pokušaja je već zauzet drugim zapisom.');
+          }
           if (!loc.exists() || loc.data().archived) throw new DomainError('bad-location');
           await hooks.afterReads?.();
           tx.set(ref(`items/${itemId}`), {
@@ -323,7 +391,7 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           );
         }),
       );
-      return { itemId, placementId };
+      return alreadyExisted ? { itemId, placementId, alreadyExisted } : { itemId, placementId };
     },
 
     async updateItem(id, patch, expectedVersion) {
@@ -430,6 +498,94 @@ export function createInventoryRepository(ctx: RepositoryContext): InventoryRepo
           }),
         versionChanged(`placements/${id}`, expectedVersion),
       );
+    },
+
+    async verify(spec) {
+      const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+      const read = async (path: string) => {
+        try {
+          return await getDocFromServer(ref(path));
+        } catch (e) {
+          if (isPermissionDenied(e)) {
+            if (await accessRevoked()) throw new DomainError('access-revoked');
+            throw new DomainError('unknown', 'Pravila su odbila čitanje.');
+          }
+          const d = toDomainError(e);
+          if (d.code === 'offline') return null; // server nedostupan: ishod i dalje nepoznat
+          throw d;
+        }
+      };
+      // ver: verzija nakon naše promjene je expected+1; ista verzija = promjena nije primijenjena; ostalo = netko drugi
+      const byVersion = (
+        snap: Awaited<ReturnType<typeof read>>,
+        expected: number,
+        matches: (d: Record<string, unknown>) => boolean,
+      ): VerifyResult => {
+        if (!snap) return 'unknown';
+        if (!snap.exists()) return 'changed-elsewhere';
+        const d = snap.data();
+        if (d.version === expected) return 'not-applied';
+        return d.version === expected + 1 && matches(d) ? 'applied' : 'changed-elsewhere';
+      };
+      switch (spec.op) {
+        case 'createItem': {
+          const [it, pl] = await Promise.all([
+            read(`items/${spec.itemId}`),
+            read(`placements/${spec.placementId}`),
+          ]);
+          if (!it || !pl) return 'unknown';
+          if (!it.exists() && !pl.exists()) return 'not-applied';
+          // identitet: oba zapisa moraju postojati i biti povezana ID-evima pokušaja (ne uspoređuje se naziv)
+          return it.exists() && pl.exists() && pl.data().itemId === spec.itemId
+            ? 'applied'
+            : 'changed-elsewhere';
+        }
+        case 'createLocation': {
+          const s = await read(`locations/${spec.id}`);
+          if (!s) return 'unknown';
+          return s.exists() ? 'applied' : 'not-applied';
+        }
+        case 'addPlacement': {
+          const item = await read(`items/${spec.itemId}`);
+          if (!item) return 'unknown';
+          if (!item.exists()) return 'changed-elsewhere';
+          const key = await read(
+            `placementKeys/${keyIdFor(item.data().kind as ItemKind, spec.itemId, spec.locationId)}`,
+          );
+          if (!key) return 'unknown';
+          return key.exists() ? 'applied' : 'not-applied';
+        }
+        case 'updateItem': {
+          const patch: Record<string, unknown> = {};
+          if (spec.patch.name !== undefined) patch.name = cleanName(spec.patch.name);
+          if (spec.patch.aliases !== undefined) patch.aliases = cleanAliases(spec.patch.aliases);
+          if (spec.patch.category !== undefined)
+            patch.category = cleanOptional(spec.patch.category, LIMITS.category, 'Kategorija');
+          if (spec.patch.note !== undefined)
+            patch.note = cleanOptional(spec.patch.note, LIMITS.note, 'Napomena');
+          return byVersion(await read(`items/${spec.id}`), spec.expectedVersion, (d) =>
+            Object.entries(patch).every(([k, v]) => same(d[k] ?? null, v)),
+          );
+        }
+        case 'renameLocation':
+          return byVersion(
+            await read(`locations/${spec.id}`),
+            spec.expectedVersion,
+            (d) => d.name === cleanName(spec.name),
+          );
+        case 'moveLocation':
+          return byVersion(
+            await read(`locations/${spec.id}`),
+            spec.expectedVersion,
+            (d) => d.parentId === spec.newParentId,
+          );
+        case 'movePlacement':
+          return byVersion(
+            await read(`placements/${spec.id}`),
+            spec.expectedVersion,
+            (d) => d.locationId === spec.newLocationId,
+          );
+      }
     },
 
     async archivePlacement(id, expectedVersion) {

@@ -14,7 +14,8 @@ export type SessionState =
       /** true = zadnja revalidacija nije uspjela doći do poslužitelja (offline/greška): prikaz nije svježe potvrđen. */
       stale: boolean;
     }
-  | { phase: 'denied'; user: SessionUser }
+  /** revoked: pristup je OPOZVAN tijekom otvorene sesije (otkriveno u podatkovnom sloju), ne prvotno odbijen. */
+  | { phase: 'denied'; user: SessionUser; revoked?: true }
   | { phase: 'access-error'; user: SessionUser; kind: AccessErrorKind };
 
 export type SessionEvent =
@@ -73,7 +74,7 @@ export function sessionReducer(state: SessionState, event: SessionEvent): Sessio
     }
     case 'revoked':
       return state.phase === 'member' && state.user.uid === event.uid
-        ? { phase: 'denied', user: state.user }
+        ? { phase: 'denied', user: state.user, revoked: true }
         : state;
     case 'recheck':
       return 'user' in state ? { phase: 'checking-access', user: state.user } : state;

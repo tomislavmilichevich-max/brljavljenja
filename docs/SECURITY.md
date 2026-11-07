@@ -82,6 +82,10 @@ Dokazi: `docs/P2_B_TEST_REPORT.md` §4–§6. Sažetak: izolirana podatkovna ses
 
 Pravila za stvaranje smještaja i ključa čitaju predmet kroz `getAfter()` (stanje nakon upisa), pa se Item, prvi Placement i ključ mogu stvoriti u jednoj transakciji. Sigurnosno je neutralno jer su `kind` i `archived` predmeta nepromjenjivi (D2). Jedinstvenost smještaja, limiti pristupa dokumentima i sve ranije invarijante ostaju (200 prethodnih testova prolazi nepromijenjeno). Pravila (sha256 `157feee0f7ca`) se moraju objaviti prije ili zajedno s aplikacijom; ništa nije objavljeno. **Prihvaćeno ograničenje (privatna P2 verzija):** Rules ne mogu zahtijevati da predmet ima smještaj pa neprilagođeni klijent može stvoriti predmet bez njega; produkcijski repozitorij i dalje MORA zahtijevati atomarno stvaranje s početnom lokacijom (`createItemWithPlacement`). Detalji: `docs/P2_B_TEST_REPORT.md` §8.
 
+## P2-C: sučelje i provjera ishoda (nije objavljeno)
+
+Pravila (`157feee0f7ca`) nisu mijenjana. UI ne zove Firestore izravno; ni demo podaci ni demo kontrole iz UI/UX prototipa ne smiju u bundle (`DEMO_MARKERS` u `guard:dist`). `verify()` je samo čitanje (`getDocFromServer`) i ne ponavlja upis; idempotentni ponovni pokušaj stvaranja koristi iste ID-eve pa ne može stvoriti duplikat. Pri opozivu, odjavi i promjeni računa privatni sadržaj nestaje iz DOM-a i memorije (E2E INV-12/14/16). Detalji: `docs/P2_C_TEST_REPORT.md` §3, §6.
+
 ## Granice P3 (još nije implementirano)
 
 Firestore lokalni cache podržava offline čitanje/upis, ali „last write wins“ nije dovoljan za istodobno premještanje predmeta. Online transakcija mora provjeriti `baseVersion`; `operationId` i ažuriranje trebaju atomsku idempotenciju. Sigurnosna pravila moraju posebno štititi reference i sistemska polja. Ovu logiku **ne implementirati u P1**.

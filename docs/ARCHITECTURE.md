@@ -90,16 +90,25 @@ Podatkovni sloj (`src/inventory/*`), izolirane podatkovne sesije (`src/firebase/
 - Podaci se otkrivaju i integritet stabla provjerava tek nad cjelovitim, server-potvrđenim skupom svih triju kolekcija. Nula lokacija uz postojeće predmete/smještaje je `inconsistent`, a ne "nepripremljeno kućanstvo".
 - Predmet nastaje isključivo atomarno s početnom lokacijom (`createItemWithPlacement`: Item + Placement + ključ u jednoj transakciji; naziv i lokacija obavezni).
 
+## P2-C — završno Organized Cozy sučelje i lokalna pretraga (implementirano u emulatorima/Chromiumu)
+
+Sučelje `src/app/ui/*` zamjenjuje privremeni panel; pretraga `src/search/*`. Detalji, odstupanja i ograničenja: `docs/P2_C_TEST_REPORT.md`.
+
+- UI zove **isključivo** `InventoryRepository` (ESLint + `scripts/policy.test.ts`); nikakav izravni upis u Firestore. Privatni sadržaj postoji samo dok je server-potvrđena podatkovna sesija aktivna (unmount = brisanje); URL i povijest preglednika ne sadrže podatke.
+- Pretraga je lokalna nad server-potvrđenim podacima (nema pretplate ni upita po znaku); putanje i brojači izvode se iz `parentId`.
+- **Ugovor repozitorija (P2-C):** `createItemWithPlacement({attempt})` je idempotentan uz unaprijed sačuvane ID-eve, a `verify(spec)` server-potvrđeno čita ishod po identitetu/verziji (nikad po nazivu); `outcome-unknown` se nikad ne ponavlja automatski.
+- Zaštita nespremljenih izmjena (UX-032-01) i Android Back (jedan „sentinel" zapis povijesti) u `src/app/ui/nav.ts`.
+
 ## Faze i razgraničenja
 
-| Faza | Opseg                                                          | Status                                                                                      |
-| ---- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| P0   | PWA kostur i alatni lanac                                      | Implementirano; dokumentacijske korekcije u ovom PR-u                                       |
-| P1   | Firebase Google prijava, jedno kućanstvo, ACL, testovi pravila | **Implementirano u PR-u; emulator testovi PASS; Android/stvarni Google login NOT VERIFIED** |
-| P2   | Lokacije, Item + Placement, demo inventar, lokalna pretraga    | Nije započeto                                                                               |
-| P3   | Siguran red offline namjera, konflikti, idempotencija          | Nije započeto                                                                               |
-| P4   | Privatne fotografije kroz Google Drive, pristup dva računa     | Nije započeto                                                                               |
-| P5   | Odobreni Firebase Hosting deploy, fizički Android/PWA pilot    | Nije započeto                                                                               |
+| Faza | Opseg                                                          | Status                                                                                                            |
+| ---- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| P0   | PWA kostur i alatni lanac                                      | Implementirano; dokumentacijske korekcije u ovom PR-u                                                             |
+| P1   | Firebase Google prijava, jedno kućanstvo, ACL, testovi pravila | **Implementirano u PR-u; emulator testovi PASS; Android/stvarni Google login NOT VERIFIED**                       |
+| P2   | Lokacije, Item + Placement, demo inventar, lokalna pretraga    | P2-A/B/C implementirani i provjereni u emulatorima/Chromiumu (PR-ovi); P2-D (vlasnikov Android test) nije započet |
+| P3   | Siguran red offline namjera, konflikti, idempotencija          | Nije započeto                                                                                                     |
+| P4   | Privatne fotografije kroz Google Drive, pristup dva računa     | Nije započeto                                                                                                     |
+| P5   | Odobreni Firebase Hosting deploy, fizički Android/PWA pilot    | Nije započeto                                                                                                     |
 
 Vizualni sustav i navigacija odobreni su u `docs/UI_UX_DECISIONS_V0.1.md`. Vizualno odobrenje **ne odobrava** dodatne funkcionalnosti u P1.
 

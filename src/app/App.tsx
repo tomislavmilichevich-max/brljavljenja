@@ -3,14 +3,13 @@ import { readFirebaseConfig } from '../config/env';
 import type { Services } from '../auth/types';
 import { useSession } from '../auth/useSession';
 import { createFirebaseServices } from '../firebase/client';
-import { InventoryPanel } from './InventoryPanel';
+import { InventoryApp } from './ui/InventoryApp';
 import {
   AccessError,
   CheckingAccess,
   ConfigMissing,
   Denied,
   Initializing,
-  Member,
   SignIn,
 } from './screens';
 
@@ -31,7 +30,7 @@ function defaultServices(): { services: Services } | { missing: string[] } {
   return { services: singleton };
 }
 
-function Session({ services }: { services: Services }) {
+function Session({ services, online }: { services: Services; online: boolean }) {
   const { state, signIn, signOut, recheck, revoke, signOutFailed } = useSession(services);
   switch (state.phase) {
     case 'initializing':
@@ -41,42 +40,55 @@ function Session({ services }: { services: Services }) {
     case 'checking-access':
       return <CheckingAccess />;
     case 'member':
+      // key=uid: promjena računa ODMAH uništava staru podatkovnu sesiju (listeneri + keš) i otvara novu
       return (
-        <>
-          <Member
-            householdName={state.householdName}
-            displayName={state.user.displayName}
-            verifiedAt={state.verifiedAt}
-            stale={state.stale}
-            onRecheck={recheck}
-            onSignOut={signOut}
-            signOutFailed={signOutFailed}
-          />
-          {/* key=uid: promjena računa ODMAH uništava staru podatkovnu sesiju (listeneri + keš) i otvara novu */}
-          <InventoryPanel key={state.user.uid} port={services.data} onRevoked={revoke} />
-        </>
+        <InventoryApp
+          key={state.user.uid}
+          port={services.data}
+          onRevoked={revoke}
+          online={online}
+          account={{
+            householdName: state.householdName,
+            displayName: state.user.displayName,
+            verifiedAt: state.verifiedAt,
+            stale: state.stale,
+            onRecheck: recheck,
+            onSignOut: signOut,
+            signOutFailed,
+          }}
+        />
       );
     case 'denied':
-      return <Denied uid={state.user.uid} onRecheck={recheck} onSignOut={signOut} />;
+      return (
+        <Denied
+          uid={state.user.uid}
+          revoked={state.revoked === true}
+          onRecheck={recheck}
+          onSignOut={signOut}
+        />
+      );
     case 'access-error':
       return <AccessError kind={state.kind} onRecheck={recheck} onSignOut={signOut} />;
   }
 }
 
-/** PRIVREMENI neutralni prikaz (P1). Konačni UI/UX dolazi iz zasebnog handoffa. */
+/** Završni Organized Cozy prikaz (P2-C). Prijava, provjera pristupa i inventar zadržavaju P1/P2-B jamstva. */
 export function App({ services }: { services?: Services }) {
   const online = useSyncExternalStore(subscribeOnline, () => navigator.onLine);
   const resolved = useMemo(() => (services ? { services } : defaultServices()), [services]);
 
   return (
-    <main className="shell">
-      <h1>Kućni inventar</h1>
-      <p data-testid="network">{online ? 'online' : 'offline'}</p>
-      {'services' in resolved ? (
-        <Session services={resolved.services} />
-      ) : (
-        <ConfigMissing missing={resolved.missing} />
-      )}
-    </main>
+    <div className="shell">
+      <div className="app-wrap">
+        <span className="sr-only" data-testid="network">
+          {online ? 'online' : 'offline'}
+        </span>
+        {'services' in resolved ? (
+          <Session services={resolved.services} online={online} />
+        ) : (
+          <ConfigMissing missing={resolved.missing} />
+        )}
+      </div>
+    </div>
   );
 }

@@ -67,6 +67,28 @@ const FORBIDDEN_IN_BUNDLE = [
   'fake-api-key',
 ];
 
+// P2-C: demo podaci i demo kontrole iz UI/UX prototipa NIKAD ne smiju u produkcijski bundle (nizovi su specifični za
+// prototip i sintetski fixture; obični korisnički tekst ih ne sadrži).
+export const DEMO_MARKERS = Object.freeze([
+  'simulatedWrite',
+  '__demoSeq',
+  'fixtureOnly',
+  'P2_DEMO_HOUSE',
+  'demo-house',
+  'testScenarios',
+  'Demo i statusi',
+  'set-outcome',
+  'verifyResolution',
+  'DEMO kuća',
+  'Regal A',
+  'Kutija začina',
+  'Božićni ukrasi',
+  'Đurđevak',
+  'TV ormarić',
+  'Set imbus',
+  'Ormar s alatom',
+]);
+
 /** files: [{ path: 'assets/x.js', content: Buffer|string }] relativno na dist. */
 export function checkDist(files, { projectId = EXPECTED.projectId } = {}) {
   const problems = [];
@@ -81,6 +103,9 @@ export function checkDist(files, { projectId = EXPECTED.projectId } = {}) {
   const text = js.map((f) => f.content.toString()).join('\n');
   for (const bad of FORBIDDEN_IN_BUNDLE) {
     if (text.includes(bad)) problems.push(`bundle sadrži zabranjeni trag: ${bad}`);
+  }
+  for (const marker of DEMO_MARKERS) {
+    if (text.includes(marker)) problems.push(`bundle sadrži demo podatak/kontrolu: ${marker}`);
   }
   if (!text.includes(projectId)) problems.push(`bundle ne sadrži očekivani projectId ${projectId}`);
   if (
