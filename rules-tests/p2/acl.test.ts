@@ -489,6 +489,17 @@ describe('ACL-31 testovi imaju zube: namjerno pokvarena pravila MORAJU oboriti s
         });
       },
     },
+    {
+      name: 'M17 prostorija smije imati roditelja koji nije root',
+      mutate: (r) => r.replace(/\n\s*&& \(d\.kind != 'room' \|\| d\.parentId == 'root'\)/, ''),
+      probe: (e) =>
+        setDoc(D(as(e, UID_A), 'locations/room-in-cabinet'), {
+          name: 'Soba u ormaru',
+          parentId: 'garage-tool',
+          kind: 'room',
+          ...audit(UID_A),
+        }),
+    },
   ];
 
   it('kontrola: originalna pravila odbijaju sve probe (inače bi mutacije bile besmislene)', async () => {
