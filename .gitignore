@@ -24,3 +24,10 @@ ui-debug.log
 
 # Generirani izlaz testova
 .vitest/
+
+# Sigurnosne kopije (pravila, Hosting zapisi) ostaju IZVAN repozitorija (~/backup); ovo je samo dodatna zaštita od slučajnog commita
+backup/
+**/rules-before-deploy.*
+**/ruleset-name-before.txt
+**/hosting-live-before.*
+**/deploy-commit.txt
