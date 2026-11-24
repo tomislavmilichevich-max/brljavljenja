@@ -28,6 +28,7 @@ export interface Report {
     note: string;
   };
   confirmedKinds: number;
+  potential: { reviewItems: number; writesIfAllConfirmed: number; note: string };
   creates: { locations: unknown[]; items: unknown[] };
   uncertainties: unknown[];
   existing: unknown[];
@@ -95,6 +96,11 @@ export async function buildReport(
       note: 'PROCJENA za odabrani skup. Rules get()/getAfter() i stvarna potrošnja nisu mjereni; provjeriti emulator mjerenjem i Usage prije apply.',
     },
     confirmedKinds,
+    potential: {
+      reviewItems: counts.items.REVIEW,
+      writesIfAllConfirmed: counts.items.REVIEW * 3,
+      note: 'Samo informativno: REVIEW stavke se NE pripremaju za upis dok vlasnik ne potvrdi (INCLUDE + kind).',
+    },
     creates: {
       locations: m.planned
         .filter((p) => p.op === 'createLocation')
@@ -161,6 +167,7 @@ export function renderMarkdown(r: Report): string {
     `- Lokacije: ${row(r.counts.locations)}`,
     `- Stavke: ${row(r.counts.items)}`,
     `- Potvrđenih vrsta (kind): ${r.confirmedKinds}`,
+    `- Potencijal (NIJE pripremljeno): ${r.potential.reviewItems} REVIEW stavki ≈ ${r.potential.writesIfAllConfirmed} upisa kad bi se sve potvrdile`,
     `- Planirani upisi: ${r.quota.plannedWrites} (${r.quota.writesPctOfDaily} % dnevne kvote upisa); čitanja tx: ${r.quota.clientTxReads} (${r.quota.readsPctOfDaily} %)`,
     `- ${r.quota.note}`,
     '',
