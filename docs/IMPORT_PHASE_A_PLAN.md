@@ -1,12 +1,38 @@
 # IMPORT_PHASE_A_PLAN — plan faze A kontroliranog početnog uvoza (kućni PDF popis)
 
-Datum: 2026-11-24 · Status: **SAMO PLAN. NO WRITES PERFORMED.** Ništa nije pokrenuto prema Firebase produkciji; nema upisa, deploya, promjene Rules/Auth/Hostinga. Ulaz: `CLAUDE_CODE_Kucni_inventar_Import_V1.md` i `Kucni_inventar_Import_Plan_V1.xlsx` (JSON/CSV datoteke iz handoffa nisu priložene; xlsx je nosilac plana). Stvarni podaci (nazivi stvari, snapshot, logovi) **ne ulaze u repozitorij** (CLAUDE.md, ograničenje 4); ovaj dokument ne sadrži nazive stavki.
+Datum: 2026-11-24 · Status: **SAMO PLAN. NO WRITES PERFORMED.** Ništa nije pokrenuto prema Firebase produkciji; nema upisa, deploya, promjene Rules/Auth/Hostinga. Ulaz: cjeloviti paket (MD handoff, JSON plan, CSV, xlsx, PDF). Stvarni podaci (nazivi stvari, snapshot, logovi) **ne ulaze u repozitorij** (CLAUDE.md, ograničenje 4); ovaj dokument ne sadrži nazive stavki.
 
-## 1. Što je analizirano
+## 1. Što je analizirano (ponovljeno nad cjelovitim paketom)
+Paket: `CLAUDE_CODE_Kucni_inventar_Import_V1.md` (identičan ranije primljenom), `Kucni_inventar_Import_Plan_V1.json` (autoritativan), `…Lokacije/Stavke/Izvorni_redci_V1.csv` (UTF-8 s BOM-om, **separator `;`**), `…xlsx`, izvorni PDF (8 str.). Metadata plana: `live_state_snapshot = NOT_OBTAINED`, `production_write_authorization = NOT_GRANTED`.
 
-- Plan (xlsx): 7 prostorija, 118 izvornih redaka, **161 plan-lokacija** (21 `RECONCILE_EXISTING` = Dnevni boravak), **393 kandidata** (`CANDIDATE` 224, `REVIEW` 128, `HOLD_EXISTING_ROOM` 38, `SUMMARY_DO_NOT_IMPORT` 3), `quantity`/`item_kind`/kategorija prazni.
-- Kod `main` (`ede881f`): `repository.ts`, `validation.ts`, `types.ts`, `firestore.rules`, `scripts/ops`, auth/session, `docs/P2_A_ADR.md`.
-- Provjera strukturne valjanosti plana prema invarijantama aplikacije (skripta nad xlsx, bez mreže): ID-ovi lokacija jedinstveni; svi roditelji postoje; `room` samo izravno pod `root`; nema duplikata (roditelj, naziv) ni (putanja, naziv); sve stavke imaju poznatu putanju; svaki izvorni redak ima kandidata; maks. dubina 4; nazivi lokacija ≤ 120 i bez razmaka na rubovima. **Nalaz:** 2 naziva stavki prelaze limit Rules od 120 znakova (`cand-0183` = 128, status REVIEW; `cand-0272` = 152, HOLD) — moraju se skratiti/prebaciti u bilješku prije uvoza.
+**Provjere plana (lokalno, bez mreže i bez produkcije):**
+
+| Provjera | Rezultat |
+| --- | --- |
+| JSON ↔ CSV ↔ XLSX | brojevi (161 / 118 / 393) i skupovi ID-eva jednaki; nazivi i statusi kandidata jednaki |
+| **Doslovnost izvora** | **118/118** `source_text_verbatim` pronađeno doslovno u tekstu PDF-a (`pdftotext`, normalizacija razmaka) |
+| Struktura lokacija | ID-ovi jedinstveni; svi roditelji postoje; `room` samo pod root; putanje konzistentne s roditeljima; nema duplikata (roditelj, naziv); nazivi ≤ 120 i bez razmaka na rubovima; maks. dubina 4; kinds ∈ {room, shelf, cabinet, drawer, box, other} |
+| Kandidati | svaki ima postojeću lokaciju i izvorni redak; svaki izvorni redak ima ≥ 1 kandidata (prosj. 3,3, maks. 13); nema duplikata (putanja, naziv); `quantity`, `item_kind`, `item_category`, `firestore_*` svi `null` |
+| **Nalaz: predugi nazivi** | `cand-0183` (128 znakova, REVIEW) i `cand-0272` (152, HOLD) prelaze limit Rules od 120 — moraju se skratiti ili prebaciti u bilješku |
+| Lokacije koje traže odluku | 3 (`needs_review`): „Sve police iznad", „srednja i donja ladica", „2. i 3. polica" — zbirni opisi, **ne razdvajati automatski** |
+| Zbirni kandidati | 3 `SUMMARY_DO_NOT_IMPORT` (Soba za hobi: tri kutije, sunčane naočale, božićni pokloni; sadržaj tih kutija opisan je zasebno → bez dvostrukog unosa) |
+
+**Brojevi po prostoriji (kandidati) i lokacije za kreiranje**
+
+| Prostorija | CANDIDATE | REVIEW | HOLD | SUMMARY | Lokacija za kreirati |
+| --- | --- | --- | --- | --- | --- |
+| Špajza | 54 | 39 | – | – | 27 |
+| Kuhinja | 55 | 35 | – | – | 32 |
+| Hodnik | 31 | 23 | – | – | 26 |
+| Dnevni boravak (već unesen) | – | – | 38 | – | 0 (21 `RECONCILE_EXISTING`) |
+| WC / Kupaonica | 43 | 9 | – | – | 22 |
+| Soba za hobi | 26 | 11 | – | 3 | 15 |
+| Spavaća soba | 15 | 11 | – | – | 18 |
+| **Ukupno** | **224** | **128** | **38** | **3** | **140** (6 soba + 134 podlokacije: 43 polica, 32 ormara, 30 ostalo, 18 ladica, 11 kutija) |
+
+`REVIEW`: 122 × „skupina / pojedinačni predmet / već evidentirano?", 6 × potencijalno osjetljiva kategorija. Ponovljeni nazivi: **40 kandidata u 19 grupa** (flag, ne deduplicirati). Osjetljivih kandidata ukupno 19 (10 Dnevni boravak, 6 Spavaća soba, 2 Hodnik, 1 Kuhinja).
+
+**Kod `main`** (`ede881f`): `repository.ts`, `validation.ts`, `types.ts`, `firestore.rules`, `scripts/ops`, auth/session, `docs/P2_A_ADR.md` (kontrola u §2).
 
 ## 2. Kompatibilnost plana s aplikacijom
 
@@ -18,7 +44,7 @@ Datum: 2026-11-24 · Status: **SAMO PLAN. NO WRITES PERFORMED.** Ništa nije pok
 | `createItemWithPlacement({…,kind,attempt})` | **`kind` obavezan** (`unique`/`type`); atomarno Item+Placement+ključ; idempotentno uz `attempt` (`itemId`,`placementId`) | plan nema `kind` → **vlasnikova odluka**; `attempt` ID-evi iz plana                                                |
 | Količine                                    | ne postoje u P2 modelu                                                                                                   | `quantity=null` ostaje; ne izmišljati                                                                              |
 | Brisanje                                    | Rules **ne dopuštaju** brisanje lokacija/predmeta/smještaja (samo ključa)                                                | povrat uvoza = privilegirani alat (§7), ne klijent                                                                 |
-| Spark kvote                                 | 20k upisa i 50k čitanja/dan                                                                                              | uvoz ≈ 1,2–1,6k upisa i ≈ 5–8k čitanja (uklj. Rules `get`) → < 10 % dnevnih kvota                                  |
+| Spark kvote                                 | 20k upisa i 50k čitanja/dan                                                                                              | samo `CANDIDATE`: 140 + 224×3 = **812 upisa**; uz sve `REVIEW`: 140 + 352×3 = **1 196 upisa**; ≈ 4–8k čitanja (uklj. Rules `get`) → < 10 % dnevnih kvota                                  |
 
 ## 3. Arhitektura: odluka o izvedbi (za vlasnika)
 
@@ -50,7 +76,7 @@ Faza B (apply) tek uz **novo izričito odobrenje** nakon što vlasnik pregleda s
 ## 5. Pravila mapiranja (predložena; vlasnik odobrava)
 
 - Lokacije: `room` izravno pod Kućom; ostale vrste iz plana; nepoznata vrsta → `other`; postojeća lokacija se prepoznaje po (roditelj, naziv) **i** vrsti — neslaganje = `REVIEW`, nikad prepis.
-- Stavka = jedan `Item` + jedan `Placement` po kandidatu (nema globalne deduplikacije po nazivu; „Ponovljeni nazivi" (41 redak) ostaju zasebni predmeti dok vlasnik izričito ne spoji u vrstu s više smještaja).
+- Stavka = jedan `Item` + jedan `Placement` po kandidatu (nema globalne deduplikacije po nazivu; ponovljeni nazivi (40 kandidata u 19 grupa) ostaju zasebni predmeti dok vlasnik izričito ne spoji u vrstu s više smještaja).
 - `SUMMARY_DO_NOT_IMPORT` (3): strogo preskočeno. Zbirni redci (npr. „2. i 3. polica") **ostaju jedna lokacija**; kutije i njihov sadržaj ne dvostruko.
 - Privatne/osjetljive stavke (19: dokumenti, lijekovi, računi): samo naziv i položaj, uz vlasnikovu potvrdu po kategoriji; sadržaj dokumenata se ne evidentira.
 - `quantity`, kategorija: ostaju prazni. `note`: samo izvor („PDF 24.11.2026") ako vlasnik želi.
@@ -71,7 +97,7 @@ Prazna špajza; postojeća lokacija (isti/različit roditelj i vrsta); dva ista 
 1. **Vrsta predmeta (`unique`/`type`)** — jedno pravilo za sve (npr. sve `type`, jer može imati više smještaja) ili po kategoriji? Bez odluke se ne uvozi ništa.
 2. **`REVIEW` (128):** uvoziti skupno kako piše u PDF-u (jedan zapis za skupinu), razdvojiti, ili izostaviti dok ne pregledate sheet „Za provjeru"?
 3. **Dnevni boravak:** ostaje HOLD; želite li da dry-run napravi samo usporedbu s onim što ste ručno unijeli (bez ikakvog upisa)?
-4. **Ponovljeni nazivi (41):** zasebni predmeti (preporuka) ili spojiti u isti predmet s više mjesta?
+4. **Ponovljeni nazivi (40 kandidata, 19 grupa):** zasebni predmeti (preporuka) ili spojiti u isti predmet s više mjesta?
 5. **Privatne stavke (19):** uvesti samo nazive/položaje ili izostaviti?
 6. **Arhitektura §3** (A = CLI kao član, B = ekran u aplikaciji) i **izvođač**: koji račun/član izvodi uvoz; može li se prenijeti manifest u Cloud Shell (upload) ili preferirate B?
 7. Dva predugačka naziva (128 i 152 znaka): skratiti uz bilješku?
